@@ -1,0 +1,7 @@
+/data/03771/nhuynh/usi/OpenCL-mnist/mnist/device/mnist.cl:23:49: warning: declaring kernel argument with no 'restrict' may lead to low kernel performance
+__kernel void vector_add(__global const double *x, 
+                                                ^
+/data/03771/nhuynh/usi/OpenCL-mnist/mnist/device/mnist.cl:24:49: warning: declaring kernel argument with no 'restrict' may lead to low kernel performance
+                         __global const double *y, 
+                                                ^
+2 warnings generated.
