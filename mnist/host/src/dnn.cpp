@@ -573,10 +573,10 @@ void feedForwardNetwork(Network *nn){
                 // Start by adding the bias
                 node->output = node->bias;
                 // @attention When calculating node output only loop through the BACKWARD connections
-                printf("backwardConnCount: %d\n", node->backwardConnCount);
+                //printf("backwardConnCount: %d\n", node->backwardConnCount);
                 init_problem2(node);
                 run2();
-
+/*
                 int count = 0;
                 double temp[180];
                 for(unsigned i = 0; i < num_devices; ++i) {
@@ -593,7 +593,8 @@ void feedForwardNetwork(Network *nn){
                         node->output += temp[i];
                     }
                 }
-                
+*/
+                node->output = out[0][0]; 
                 //printf("node output: %lf\n", node->output);
                 ////calcNodeOutput(node); ends
                 ////activateNode(node, layer->layerDef->activationType); begins

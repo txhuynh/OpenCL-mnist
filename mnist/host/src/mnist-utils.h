@@ -17,16 +17,17 @@
 #include <stdio.h>
 
 // Define locations of MNIST data set files
-#define MNIST_TRAINING_SET_IMAGE_FILE_NAME "../../data/train-images-idx3-ubyte"
-#define MNIST_TRAINING_SET_LABEL_FILE_NAME "../../data/train-labels-idx1-ubyte"
-#define MNIST_TESTING_SET_IMAGE_FILE_NAME "../../data/t10k-images-idx3-ubyte"
-#define MNIST_TESTING_SET_LABEL_FILE_NAME "../../data/t10k-labels-idx1-ubyte"
+#define MNIST_TRAINING_SET_IMAGE_FILE_NAME "../data/train-images-idx3-ubyte"
+#define MNIST_TRAINING_SET_LABEL_FILE_NAME "../data/train-labels-idx1-ubyte"
+#define MNIST_TESTING_SET_IMAGE_FILE_NAME "../data/t10k-images-idx3-ubyte"
+#define MNIST_TESTING_SET_LABEL_FILE_NAME "../data/t10k-labels-idx1-ubyte"
 
 /// Define number datasets (images+labels) in the TRAIN file/s
-#define MNIST_MAX_TRAINING_IMAGES 60000
+//#define MNIST_MAX_TRAINING_IMAGES 60000
+#define MNIST_MAX_TRAINING_IMAGES 1
 
 /// Define number datasets (images+labels) in the TEST file/s
-#define MNIST_MAX_TESTING_IMAGES 10000
+#define MNIST_MAX_TESTING_IMAGES 1
 
 // Define image size in pixels
 #define MNIST_IMG_WIDTH 28

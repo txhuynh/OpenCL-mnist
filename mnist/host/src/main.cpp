@@ -50,30 +50,19 @@ using namespace aocl_utils;
 
 // OpenCL runtime configuration
 cl_platform_id platform = NULL;
-unsigned num_devices = 0;
+unsigned num_devices = 1;
+unsigned tmp_n_dev; //dummy variable
 scoped_array<cl_device_id> device; // num_devices elements
 cl_context context = NULL;
 scoped_array<cl_command_queue> queue; // num_devices elements
 cl_program program = NULL;
 scoped_array<cl_kernel> kernel; // num_devices elements
-scoped_array<cl_mem> input_a_buf; // num_devices elements
-scoped_array<cl_mem> input_b_buf; // num_devices elements
-scoped_array<cl_mem> output_buf; // num_devices elements
-
-//mnist
 scoped_array<cl_mem> in1_buf; // num_devices elements
 scoped_array<cl_mem> in2_buf; // num_devices elements
+scoped_array<cl_mem> in3_buf; // num_devices elements
 scoped_array<cl_mem> out_buf; // num_devices elements
 
-// Problem data.
-unsigned N = 1000000; // problem size
-scoped_array<scoped_aligned_ptr<float> > input_a, input_b; // num_devices elements
-scoped_array<scoped_aligned_ptr<float> > output; // num_devices elements
-scoped_array<scoped_array<float> > ref_output; // num_devices elements
-scoped_array<unsigned> n_per_device; // num_devices elements
-
-//mnist
-unsigned M = 180; // problem size
+unsigned M = 1000; // problem size
 scoped_array<scoped_aligned_ptr<double> > in1, in2; // num_devices elements
 scoped_array<scoped_aligned_ptr<double> > out; // num_devices elements
 scoped_array<scoped_array<double> > ref_out; // num_devices elements
@@ -83,11 +72,7 @@ LayerDefinition *layerDefs;
 Network *nn;
 
 // Function prototypes
-float rand_float();
 bool init_opencl();
-//void init_problem();
-//void run();
-//void cleanup();
 
 /**
  * @brief Trains a network on the MNIST training set
@@ -127,7 +112,7 @@ void trainNetwork(Network *nn){
 
         // Display progress during training
         //displayTrainingProgress(imgCount, errCount);
-
+        printf("Images trained = %d\n", imgCount);
     }
     
     // Close files
@@ -173,9 +158,9 @@ void testNetwork(Network *nn){
         if (classification!=lbl) errCount++;
         
         // Display progress during testing
-       // displayTestingProgress(imgCount, errCount);
+        //displayTestingProgress(imgCount, errCount);
     }
-    
+    printf("Testing: imgCount = %d, errCount = %d\n", MNIST_MAX_TESTING_IMAGES, errCount);
     // Close files
     fclose(imageFile);
     fclose(labelFile);
@@ -186,48 +171,39 @@ void testNetwork(Network *nn){
 int main(int argc, char **argv) {
   Options options(argc, argv);
 
-  // Optional argument to specify the problem size.
-  if(options.has("n")) {
-    N = options.get<unsigned>("n");
-  }
-
   // Initialize OpenCL.
   if(!init_opencl()) {
     return -1;
   }
 
-    // Define how many layers
-    int numberOfLayers = 3;
-
-    // Define the network model as individual layers (layer by layer)
-    LayerDefinition inputLayer = {
-        INPUT,	// layerType
-        NONE,	// activationType
-        (Volume){MNIST_IMG_WIDTH, MNIST_IMG_HEIGHT, 0},	// nodeMap
-        0	// filter
-    };
-    
-    LayerDefinition hiddenLayer = {
-        FULLY_CONNECTED,	// layerType
-        RELU,			// activationType
-        (Volume){100, 0, 0},	// nodeMap
-        0			// filter
-    };
-    
-    LayerDefinition hiddenLayer2 = {
-        FULLY_CONNECTED,	// layerType
-        RELU,			// activationType
-        (Volume){20, 0, 0},	// nodeMap
-        0			// filter
-    };
-    
-    LayerDefinition outputLayer = {
-        OUTPUT,			// layerType
-        RELU,			// activationType
-        (Volume){10, 0, 0},	// nodeMap
-        0			// filter
-    };
-    
+  int numberOfLayers = 3;
+  LayerDefinition inputLayer = {
+         INPUT,
+         NONE,
+         (Volume){MNIST_IMG_WIDTH, MNIST_IMG_HEIGHT},
+         0
+     };
+ 
+     LayerDefinition hiddenLayer = {
+         CONVOLUTIONAL,
+         RELU,
+         (Volume){13, 13, 5},
+         5
+     };
+ 
+     LayerDefinition hiddenLayer2 = {
+         CONVOLUTIONAL,
+         RELU,
+         (Volume){6, 6, 5},
+         3
+     };
+ 
+     LayerDefinition outputLayer = {
+         OUTPUT,
+         RELU,
+         (Volume){10}
+     };
+   
     // Create an array to hold all of the above layer definitions (for easier reference throught the code)
     layerDefs = setLayerDefinitions(numberOfLayers, inputLayer, hiddenLayer, /*hiddenLayer2,*/ outputLayer);
     
@@ -240,17 +216,8 @@ int main(int argc, char **argv) {
     // Define additional hyper-parameters (optional)
     nn->learningRate = 0.0004;
 
-  // for mnist we need to init_problem() and run() inside the training loop
-  // Initialize the problem data.
-  // Requires the number of devices to be known.
-  // init_problem();
-
-  // Run the kernel.
-  // run();
-
     // Train the network
     trainNetwork(nn);
-    // printf("\n");
     
     // Test the network
     testNetwork(nn);
@@ -266,11 +233,6 @@ int main(int argc, char **argv) {
 }
 
 /////// HELPER FUNCTIONS ///////
-
-// Randomly generate a floating-point number between -10 and 10.
-float rand_float() {
-  return float(rand()) / float(RAND_MAX) * 20.0f - 10.0f;
-}
 
 // Initializes the OpenCL objects.
 bool init_opencl() {
@@ -290,7 +252,7 @@ bool init_opencl() {
   }
 
   // Query the available OpenCL device.
-  device.reset(getDevices(platform, CL_DEVICE_TYPE_ALL, &num_devices));
+  device.reset(getDevices(platform, CL_DEVICE_TYPE_ALL, &tmp_n_dev));
   printf("Platform: %s\n", getPlatformName(platform).c_str());
   printf("Using %d device(s)\n", num_devices);
   for(unsigned i = 0; i < num_devices; ++i) {
@@ -314,11 +276,6 @@ bool init_opencl() {
   // Create per-device objects.
   queue.reset(num_devices);
   kernel.reset(num_devices);
-  n_per_device.reset(num_devices);
-  input_a_buf.reset(num_devices);
-  input_b_buf.reset(num_devices);
-  output_buf.reset(num_devices);
-  //mnist
   m_per_device.reset(num_devices);
   in1_buf.reset(num_devices);
   in2_buf.reset(num_devices);
@@ -335,27 +292,9 @@ bool init_opencl() {
     checkError(status, "Failed to create kernel");
 
     // Determine the number of elements processed by this device.
-    n_per_device[i] = N / num_devices; // number of elements handled by this device
-    //mnist
     m_per_device[i] = M / num_devices; // number of elements handled by this device
 
-    // Spread out the remainder of the elements over the first
-    // N % num_devices.
-    if(i < (N % num_devices)) {
-      n_per_device[i]++;
-    }
-    //mnist
-    if (i < (M % num_devices)) m_per_device[i]++;
-
     // Input buffers.
-    input_a_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        n_per_device[i] * sizeof(float), NULL, &status);
-    checkError(status, "Failed to create buffer for input A");
-
-    input_b_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        n_per_device[i] * sizeof(float), NULL, &status);
-    checkError(status, "Failed to create buffer for input B");
-    //mnist
     in1_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY, 
         m_per_device[i] * sizeof(double), NULL, &status);
     checkError(status, "Failed to create buffer for input 1");
@@ -363,12 +302,8 @@ bool init_opencl() {
     in2_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY, 
         m_per_device[i] * sizeof(double), NULL, &status);
     checkError(status, "Failed to create buffer for input 2");
- 
+
     // Output buffer.
-    output_buf[i] = clCreateBuffer(context, CL_MEM_WRITE_ONLY, 
-        n_per_device[i] * sizeof(float), NULL, &status);
-    checkError(status, "Failed to create buffer for output");
-    //mnist
     out_buf[i] = clCreateBuffer(context, CL_MEM_WRITE_ONLY, 
         m_per_device[i] * sizeof(double), NULL, &status);
     checkError(status, "Failed to create buffer for out");
@@ -376,35 +311,7 @@ bool init_opencl() {
 
   return true;
 }
-/*
 // Initialize the data for the problem. Requires num_devices to be known.
-void init_problem() {
-  if(num_devices == 0) {
-    checkError(-1, "No devices");
-  }
-
-  input_a.reset(num_devices);
-  input_b.reset(num_devices);
-  output.reset(num_devices);
-  ref_output.reset(num_devices);
-  // Generate input vectors A and B and the reference output consisting
-  // of a total of N elements.
-  // We create separate arrays for each device so that each device has an
-  // aligned buffer. 
-  for(unsigned i = 0; i < num_devices; ++i) {
-    input_a[i].reset(n_per_device[i]);
-    input_b[i].reset(n_per_device[i]);
-    output[i].reset(n_per_device[i]);
-    ref_output[i].reset(n_per_device[i]);
-
-    for(unsigned j = 0; j < n_per_device[i]; ++j) {
-      input_a[i][j] = rand_float();
-      input_b[i][j] = rand_float();
-      ref_output[i][j] = input_a[i][j] + input_b[i][j];
-    }
-  }
-}
-*/
 void init_problem2(Node* node) {
   if(num_devices == 0) {
     checkError(-1, "No devices");
@@ -421,14 +328,14 @@ void init_problem2(Node* node) {
     in2[i].reset(m_per_device[i]);
     out[i].reset(m_per_device[i]);
     ref_out[i].reset(m_per_device[i]);
- 
+
     for(unsigned j = 0; j < m_per_device[i]; ++j) {
       if (count < node->backwardConnCount){
         Node *targetNode = node->connections[i].nodePtr;
         if (targetNode != NULL){
           in1[i][j] = *node->connections[i].weightPtr;
           in2[i][j] = targetNode->output;
-          ref_out[i][j] = in1[i][j] * in2[i][j];
+          ref_out[i][0] += in1[i][j] * in2[i][j];
         } else {  in1[i][j] = 0; in2[i][j] = 0; ref_out[i][j] = 0;  }
       } else { 
         in1[i][j] = 0; in2[i][j] = 0; ref_out[i][j] = 0;
@@ -437,7 +344,7 @@ void init_problem2(Node* node) {
     }
   }
 }
-
+//-----------------------------------------------------------------------------
 void run2() {
   cl_int status;
 
@@ -484,7 +391,7 @@ void run2() {
     // Events are used to ensure that the kernel is not launched until
     // the writes to the input buffers have completed.
     const size_t global_work_size = m_per_device[i];
-    printf("Launching for device %d (%d elements)\n", i, global_work_size);
+    //printf("Launching for device %d (%d elements)\n", i, global_work_size);
 
     status = clEnqueueNDRangeKernel(queue[i], kernel[i], 1, NULL,
         &global_work_size, NULL, 2, write_event, &kernel_event[i]);
@@ -505,13 +412,14 @@ void run2() {
   const double end_time = getCurrentTimestamp();
 
   // Wall-clock time taken.
-  printf("\nTime: %0.3f ms\n", (end_time - start_time) * 1e3);
+  //printf("\nTime: %0.3f ms\n", (end_time - start_time) * 1e3);
 
   // Get kernel times using the OpenCL event profiling API.
+  /*
   for(unsigned i = 0; i < num_devices; ++i) {
     cl_ulong time_ns = getStartEndTime(kernel_event[i]);
     printf("Kernel time (device %d): %0.3f ms\n", i, double(time_ns) * 1e-6);
-  }
+  }*/
 
   // Release all events.
   for(unsigned i = 0; i < num_devices; ++i) {
@@ -530,134 +438,9 @@ void run2() {
       }
     }
   } 
-  printf("\nVerification: %s\n", pass ? "PASS" : "FAIL");
+  //printf("\nVerification: %s\n", pass ? "PASS" : "FAIL");
 }
-/*
-void run() {
-  cl_int status;
-
-  const double start_time = getCurrentTimestamp();
-
-  // Launch the problem for each device.
-  scoped_array<cl_event> kernel_event(num_devices);
-  scoped_array<cl_event> finish_event(num_devices);
-
-  for(unsigned i = 0; i < num_devices; ++i) {
-
-    // Transfer inputs to each device. Each of the host buffers supplied to
-    // clEnqueueWriteBuffer here is already aligned to ensure that DMA is used
-    // for the host-to-device transfer.
-    cl_event write_event[2];
-    status = clEnqueueWriteBuffer(queue[i], input_a_buf[i], CL_FALSE,
-        0, n_per_device[i] * sizeof(float), input_a[i], 0, NULL, &write_event[0]);
-    checkError(status, "Failed to transfer input A");
-
-    status = clEnqueueWriteBuffer(queue[i], input_b_buf[i], CL_FALSE,
-        0, n_per_device[i] * sizeof(float), input_b[i], 0, NULL, &write_event[1]);
-    checkError(status, "Failed to transfer input B");
-
-    // Set kernel arguments.
-    unsigned argi = 0;
-
-    status = clSetKernelArg(kernel[i], argi++, sizeof(cl_mem), &input_a_buf[i]);
-    checkError(status, "Failed to set argument %d", argi - 1);
-
-    status = clSetKernelArg(kernel[i], argi++, sizeof(cl_mem), &input_b_buf[i]);
-    checkError(status, "Failed to set argument %d", argi - 1);
-
-    status = clSetKernelArg(kernel[i], argi++, sizeof(cl_mem), &output_buf[i]);
-    checkError(status, "Failed to set argument %d", argi - 1);
-
-    // Enqueue kernel.
-    // Use a global work size corresponding to the number of elements to add
-    // for this device.
-    // 
-    // We don't specify a local work size and let the runtime choose
-    // (it'll choose to use one work-group with the same size as the global
-    // work-size).
-    //
-    // Events are used to ensure that the kernel is not launched until
-    // the writes to the input buffers have completed.
-    const size_t global_work_size = n_per_device[i];
-    printf("Launching for device %d (%d elements)\n", i, global_work_size);
-
-    status = clEnqueueNDRangeKernel(queue[i], kernel[i], 1, NULL,
-        &global_work_size, NULL, 2, write_event, &kernel_event[i]);
-    checkError(status, "Failed to launch kernel");
-
-    // Read the result. This the final operation.
-    status = clEnqueueReadBuffer(queue[i], output_buf[i], CL_FALSE,
-        0, n_per_device[i] * sizeof(float), output[i], 1, &kernel_event[i], &finish_event[i]);
-
-    // Release local events.
-    clReleaseEvent(write_event[0]);
-    clReleaseEvent(write_event[1]);
-  }
-
-  // Wait for all devices to finish.
-  clWaitForEvents(num_devices, finish_event);
-
-  const double end_time = getCurrentTimestamp();
-
-  // Wall-clock time taken.
-  printf("\nTime: %0.3f ms\n", (end_time - start_time) * 1e3);
-
-  // Get kernel times using the OpenCL event profiling API.
-  for(unsigned i = 0; i < num_devices; ++i) {
-    cl_ulong time_ns = getStartEndTime(kernel_event[i]);
-    printf("Kernel time (device %d): %0.3f ms\n", i, double(time_ns) * 1e-6);
-  }
-
-  // Release all events.
-  for(unsigned i = 0; i < num_devices; ++i) {
-    clReleaseEvent(kernel_event[i]);
-    clReleaseEvent(finish_event[i]);
-  }
-
-  // Verify results.
-  bool pass = true;
-  for(unsigned i = 0; i < num_devices && pass; ++i) {
-    for(unsigned j = 0; j < n_per_device[i] && pass; ++j) {
-      if(fabsf(output[i][j] - ref_output[i][j]) > 1.0e-5f) {
-        printf("Failed verification @ device %d, index %d\nOutput: %f\nReference: %f\n",
-            i, j, output[i][j], ref_output[i][j]);
-        pass = false;
-      }
-    }
-  }
-
-  printf("\nVerification: %s\n", pass ? "PASS" : "FAIL");
-}
-*/
-/*
-// Free the resources allocated during initialization
-void cleanup() {
-  for(unsigned i = 0; i < num_devices; ++i) {
-    if(kernel && kernel[i]) {
-      clReleaseKernel(kernel[i]);
-    }
-    if(queue && queue[i]) {
-      clReleaseCommandQueue(queue[i]);
-    }
-    if(input_a_buf && input_a_buf[i]) {
-      clReleaseMemObject(input_a_buf[i]);
-    }
-    if(input_b_buf && input_b_buf[i]) {
-      clReleaseMemObject(input_b_buf[i]);
-    }
-    if(output_buf && output_buf[i]) {
-      clReleaseMemObject(output_buf[i]);
-    }
-  }
-
-  if(program) {
-    clReleaseProgram(program);
-  }
-  if(context) {
-    clReleaseContext(context);
-  }
-}
-*/
+//-----------------------------------------------------------------------------
 void cleanup2() {
   for(unsigned i = 0; i < num_devices; ++i) {
     if(kernel && kernel[i]) {

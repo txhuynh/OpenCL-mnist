@@ -26,3 +26,11 @@
 *.exe
 *.out
 *.app
+
+# executable dir
+mnist/bin/
+mnist/bin_mnist/
+
+# temp files
+mnist/bin_mnist.aoco
+*.swp

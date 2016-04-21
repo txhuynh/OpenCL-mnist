@@ -19,15 +19,25 @@
 // This agreement shall be governed in all respects by the laws of the State of California and
 // by the laws of the United States of America.
 
- // ACL kernel for adding two input vectors
-__kernel void vector_add(__global const double *x, 
-                         __global const double *y, 
-                         __global double *restrict z)
-{
-    // get index of the work item
-    int index = get_global_id(0);
+#define M 1000
 
-    // add the vector elements
-    z[index] = x[index] * y[index];
+ // ACL kernel for adding two input vectors
+__kernel void mnist(__global const double *x, 
+                    __global const double *y,
+                    __global double *restrict z)
+{
+  double sum = 0.0;
+  // get index of the work item
+  int index = get_global_id(0);
+
+  // add the vector elements
+  //z[index] = x[index] * y[index];
+
+  #pragma unroll
+  for (int k = 0; k < M; ++k) {
+    sum += x[k] * y[k];
+  }
+  barrier(CLK_LOCAL_MEM_FENCE);
+  z[0] = sum;
 }
 
