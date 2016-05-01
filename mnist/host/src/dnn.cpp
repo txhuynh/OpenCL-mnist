@@ -12,6 +12,7 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <iostream>
 
 // Include project libraries
 #include "mnist-utils.h"
@@ -574,8 +575,13 @@ void feedForwardNetwork(Network *nn){
                 node->output = node->bias;
                 // @attention When calculating node output only loop through the BACKWARD connections
                 //printf("backwardConnCount: %d\n", node->backwardConnCount);
-                init_problem2(node);
-                run2();
+                double result = 0.0;
+                for (int k = 0; k < (1 + node->backwardConnCount / m_per_device[0]); k += 1){ 
+                  init_problem2(node, k);
+                  result += run2();
+                  //std::cout << "result = " << result << std::endl; //TODO: delete
+                  //cleanup2(); exit(0); //TODO: delete
+                }
 /*
                 int count = 0;
                 double temp[180];
@@ -594,7 +600,7 @@ void feedForwardNetwork(Network *nn){
                     }
                 }
 */
-                node->output = out[0][0]; 
+                node->output = result; 
                 //printf("node output: %lf\n", node->output);
                 ////calcNodeOutput(node); ends
                 ////activateNode(node, layer->layerDef->activationType); begins
@@ -690,7 +696,7 @@ void initNetworkWeights(Network *nn){
     // Init weights in the weight block
     for (int i=0; i<nn->weightCount; i++){
         Weight *w = &nn->weightsPtr[i];
-        *w = 0.4 * (Weight)rand() / RAND_MAX;   // multiplying by a number <0 results in better performance
+        *w = 0.7 * (Weight)rand() / RAND_MAX;   // multiplying by a number <0 results in better performance
         if (i%2) *w = -*w;                      // make half of the weights negative (for better performance)
     }
     

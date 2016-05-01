@@ -42,6 +42,7 @@
 #include <math.h>
 #include "CL/opencl.h"
 #include "AOCLUtils/aocl_utils.h"
+#include <iostream>
 
 #include "dnn.h"
 #include "main.h"
@@ -62,7 +63,7 @@ scoped_array<cl_mem> in2_buf; // num_devices elements
 scoped_array<cl_mem> in3_buf; // num_devices elements
 scoped_array<cl_mem> out_buf; // num_devices elements
 
-unsigned M = 1000; // problem size
+unsigned M = 50; // problem size
 scoped_array<scoped_aligned_ptr<double> > in1, in2; // num_devices elements
 scoped_array<scoped_aligned_ptr<double> > out; // num_devices elements
 scoped_array<scoped_array<double> > ref_out; // num_devices elements
@@ -112,7 +113,8 @@ void trainNetwork(Network *nn){
 
         // Display progress during training
         //displayTrainingProgress(imgCount, errCount);
-        printf("Images trained = %d\n", imgCount);
+        if (imgCount % 10 == 0) //TODO: delete
+          printf("Images trained = %d\n", imgCount);
     }
     
     // Close files
@@ -176,26 +178,12 @@ int main(int argc, char **argv) {
     return -1;
   }
 
-  int numberOfLayers = 3;
-  LayerDefinition inputLayer = {
+  int numberOfLayers = 2;
+     LayerDefinition inputLayer = {
          INPUT,
          NONE,
          (Volume){MNIST_IMG_WIDTH, MNIST_IMG_HEIGHT},
          0
-     };
- 
-     LayerDefinition hiddenLayer = {
-         CONVOLUTIONAL,
-         RELU,
-         (Volume){13, 13, 5},
-         5
-     };
- 
-     LayerDefinition hiddenLayer2 = {
-         CONVOLUTIONAL,
-         RELU,
-         (Volume){6, 6, 5},
-         3
      };
  
      LayerDefinition outputLayer = {
@@ -205,7 +193,7 @@ int main(int argc, char **argv) {
      };
    
     // Create an array to hold all of the above layer definitions (for easier reference throught the code)
-    layerDefs = setLayerDefinitions(numberOfLayers, inputLayer, hiddenLayer, /*hiddenLayer2,*/ outputLayer);
+    layerDefs = setLayerDefinitions(numberOfLayers, inputLayer, outputLayer);
     
     // Display details of the network definition/architecture on the screen
     // outputNetworkDefinition(numberOfLayers, layerDefs);
@@ -312,7 +300,7 @@ bool init_opencl() {
   return true;
 }
 // Initialize the data for the problem. Requires num_devices to be known.
-void init_problem2(Node* node) {
+void init_problem2(Node* node, int iteration) {
   if(num_devices == 0) {
     checkError(-1, "No devices");
   }
@@ -322,30 +310,34 @@ void init_problem2(Node* node) {
   out.reset(num_devices);
   ref_out.reset(num_devices);
 
-  int count = 0;
   for(unsigned i = 0; i < num_devices; ++i) {
     in1[i].reset(m_per_device[i]);
     in2[i].reset(m_per_device[i]);
     out[i].reset(m_per_device[i]);
     ref_out[i].reset(m_per_device[i]);
 
-    for(unsigned j = 0; j < m_per_device[i]; ++j) {
+    int count = iteration * m_per_device[i];
+    for(unsigned j = iteration * m_per_device[i]; j < (iteration+1) * m_per_device[i]; ++j) {
+      unsigned k = j % m_per_device[i];
       if (count < node->backwardConnCount){
-        Node *targetNode = node->connections[i].nodePtr;
+        Node *targetNode = node->connections[j].nodePtr;
+        //std::cout << "here count = " << count << " of " << node->backwardConnCount << "\n"; //TODO: delete
         if (targetNode != NULL){
-          in1[i][j] = *node->connections[i].weightPtr;
-          in2[i][j] = targetNode->output;
-          ref_out[i][0] += in1[i][j] * in2[i][j];
-        } else {  in1[i][j] = 0; in2[i][j] = 0; ref_out[i][j] = 0;  }
+          in1[i][k] = *node->connections[j].weightPtr;
+          in2[i][k] = targetNode->output;
+          ref_out[i][0] += in1[i][k] * in2[i][k];
+        } else {  in1[i][k] = 0; in2[i][k] = 0; }
       } else { 
-        in1[i][j] = 0; in2[i][j] = 0; ref_out[i][j] = 0;
+        in1[i][k] = 0; in2[i][k] = 0;
       }
+      //std::cout << j << ". w = " << in1[i][k] << " ; o = " << in2[i][k] << std::endl; //TODO: delete
+      
       count += 1;
     }
   }
 }
 //-----------------------------------------------------------------------------
-void run2() {
+double run2() {
   cl_int status;
 
   const double start_time = getCurrentTimestamp();
@@ -426,19 +418,21 @@ void run2() {
     clReleaseEvent(kernel_event[i]);
     clReleaseEvent(finish_event[i]);
   }
-
+/*
   // Verify results.
   bool pass = true;
   for(unsigned i = 0; i < num_devices && pass; ++i) {
-    for(unsigned j = 0; j < m_per_device[i] && pass; ++j) {
-      if(fabsf(out[i][j] - ref_out[i][j]) > 1.0e-5f) {
+    //for(unsigned j = 0; j < m_per_device[i] && pass; ++j) {
+      if(fabsf(out[i][0] - ref_out[i][0]) > 1.0e-5f) {
         printf("Failed verification @ device %d, index %d\nOutput: %f\nReference: %f\n",
-            i, j, out[i][j], ref_out[i][j]);
+            i, 0, out[i][0], ref_out[i][0]);
         pass = false;
       }
-    }
+    //}
   } 
   //printf("\nVerification: %s\n", pass ? "PASS" : "FAIL");
+*/
+  return out[0][0];
 }
 //-----------------------------------------------------------------------------
 void cleanup2() {

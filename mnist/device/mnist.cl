@@ -19,11 +19,11 @@
 // This agreement shall be governed in all respects by the laws of the State of California and
 // by the laws of the United States of America.
 
-#define M 1000
+#define M 50
 
  // ACL kernel for adding two input vectors
-__kernel void mnist(__global const double *x, 
-                    __global const double *y,
+__kernel void mnist(__global const double *restrict x, 
+                    __global const double *restrict y,
                     __global double *restrict z)
 {
   double sum = 0.0;
