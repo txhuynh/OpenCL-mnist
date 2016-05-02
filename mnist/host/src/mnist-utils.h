@@ -24,10 +24,10 @@
 
 /// Define number datasets (images+labels) in the TRAIN file/s
 //#define MNIST_MAX_TRAINING_IMAGES 6000//0
-#define MNIST_MAX_TRAINING_IMAGES 100
+#define MNIST_MAX_TRAINING_IMAGES 2
 
 /// Define number datasets (images+labels) in the TEST file/s
-#define MNIST_MAX_TESTING_IMAGES 100//00
+#define MNIST_MAX_TESTING_IMAGES 1//00
 //#define MNIST_MAX_TESTING_IMAGES 1
 
 // Define image size in pixels

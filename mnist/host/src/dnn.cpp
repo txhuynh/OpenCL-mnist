@@ -579,7 +579,7 @@ void feedForwardNetwork(Network *nn){
                 for (int k = 0; k < (1 + node->backwardConnCount / m_per_device[0]); k += 1){ 
                   init_problem2(node, k);
                   result += run2();
-                  //std::cout << "result = " << result << std::endl; //TODO: delete
+                  std::cout << "result = " << result << std::endl; //TODO: delete
                   //cleanup2(); exit(0); //TODO: delete
                 }
 /*

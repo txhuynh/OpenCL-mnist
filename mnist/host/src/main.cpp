@@ -330,7 +330,7 @@ void init_problem2(Node* node, int iteration) {
       } else { 
         in1[i][k] = 0; in2[i][k] = 0;
       }
-      //std::cout << j << ". w = " << in1[i][k] << " ; o = " << in2[i][k] << std::endl; //TODO: delete
+      std::cout << j << ". w = " << in1[i][k] << " ; o = " << in2[i][k] << std::endl; //TODO: delete
       
       count += 1;
     }
