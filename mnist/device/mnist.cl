@@ -26,18 +26,10 @@ __kernel void mnist(__global const double *restrict x,
                     __global const double *restrict y,
                     __global double *restrict z)
 {
-  double sum = 0.0;
   // get index of the work item
   int index = get_global_id(0);
 
   // add the vector elements
-  //z[index] = x[index] * y[index];
-
-  #pragma unroll
-  for (int k = 0; k < M; ++k) {
-    sum += x[k] * y[k];
-  }
-  barrier(CLK_LOCAL_MEM_FENCE);
-  z[0] = sum;
+  z[index] = x[index] * y[index];
 }
 

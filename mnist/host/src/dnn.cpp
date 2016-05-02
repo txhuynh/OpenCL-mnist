@@ -580,7 +580,7 @@ void feedForwardNetwork(Network *nn){
                   init_problem2(node, k);
                   result += run2();
                   std::cout << "result = " << result << std::endl; //TODO: delete
-                  //cleanup2(); exit(0); //TODO: delete
+                  //if (n==5){ cleanup2(); exit(0); }//TODO: delete
                 }
 /*
                 int count = 0;

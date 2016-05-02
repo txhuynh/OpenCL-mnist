@@ -325,10 +325,10 @@ void init_problem2(Node* node, int iteration) {
         if (targetNode != NULL){
           in1[i][k] = *node->connections[j].weightPtr;
           in2[i][k] = targetNode->output;
-          ref_out[i][0] += in1[i][k] * in2[i][k];
-        } else {  in1[i][k] = 0; in2[i][k] = 0; }
+          ref_out[i][k] = in1[i][k] * in2[i][k];
+        } else {  in1[i][k] = 0; in2[i][k] = 0; ref_out[i][k] = 0; }
       } else { 
-        in1[i][k] = 0; in2[i][k] = 0;
+        in1[i][k] = 0; in2[i][k] = 0; ref_out[i][k] = 0;
       }
       std::cout << j << ". w = " << in1[i][k] << " ; o = " << in2[i][k] << std::endl; //TODO: delete
       
@@ -418,21 +418,23 @@ double run2() {
     clReleaseEvent(kernel_event[i]);
     clReleaseEvent(finish_event[i]);
   }
-/*
+
+  double sum = 0.0;
   // Verify results.
   bool pass = true;
   for(unsigned i = 0; i < num_devices && pass; ++i) {
-    //for(unsigned j = 0; j < m_per_device[i] && pass; ++j) {
-      if(fabsf(out[i][0] - ref_out[i][0]) > 1.0e-5f) {
+    for(unsigned j = 0; j < m_per_device[i] && pass; ++j) {
+      sum += out[i][j];
+      if(fabsf(out[i][j] - ref_out[i][j]) > 1.0e-5f) {
         printf("Failed verification @ device %d, index %d\nOutput: %f\nReference: %f\n",
-            i, 0, out[i][0], ref_out[i][0]);
+            i, j, out[i][j], ref_out[i][j]);
         pass = false;
       }
-    //}
+    }
   } 
-  //printf("\nVerification: %s\n", pass ? "PASS" : "FAIL");
-*/
-  return out[0][0];
+  printf("\nVerification: %s\n", pass ? "PASS" : "FAIL");
+
+  return sum;
 }
 //-----------------------------------------------------------------------------
 void cleanup2() {
