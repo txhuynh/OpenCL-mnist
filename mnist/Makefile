@@ -59,12 +59,12 @@ TARGET_DIR := bin
 
 # Directories
 INC_DIRS := ../common/inc
-LIB_DIRS := 
+LIB_DIRS := /tools/ppc_64/libcxl
 
 # Files
 INCS := $(wildcard )
 SRCS := $(wildcard host/src/*.cpp ../common/src/AOCLUtils/*.cpp)
-LIBS := 
+LIBS := cxl 
 
 # Make it all!
 all : $(TARGET_DIR)/$(TARGET)

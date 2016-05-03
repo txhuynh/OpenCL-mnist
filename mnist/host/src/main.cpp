@@ -43,11 +43,16 @@
 #include "CL/opencl.h"
 #include "AOCLUtils/aocl_utils.h"
 #include <iostream>
-
+extern "C"{
+#include "libcxl.h"
+}
 #include "dnn.h"
 #include "main.h"
 
 using namespace aocl_utils;
+
+#define DEVICE "/dev/cxl/afu1.0d"
+struct cxl_afu_h *afu = cxl_afu_open_dev ((char*) (DEVICE));
 
 // OpenCL runtime configuration
 cl_platform_id platform = NULL;
