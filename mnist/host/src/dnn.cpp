@@ -26,8 +26,8 @@
 using namespace aocl_utils;
 extern unsigned num_devices;
 extern unsigned M;
-extern scoped_array<scoped_aligned_ptr<double> > in1, in2; // num_devices elements
-extern scoped_array<scoped_aligned_ptr<double> > out; // num_devices elements
+extern scoped_array<scoped_aligned_ptr<float> > in1, in2; // num_devices elements
+extern scoped_array<scoped_aligned_ptr<float> > out; // num_devices elements
 extern scoped_array<unsigned> m_per_device; // num_devices elements
 
 #define OUT_OF_RANGE -1     // A marker for labeling node ids that are outside the given node map
@@ -459,7 +459,7 @@ Weight getDerivative(Weight outVal, ActFctType actType){
  * @param learningRate The factor with which errors are applied to weights
  */
 
-void updateNodeWeights(Node *updateNode, double learningRate){
+void updateNodeWeights(Node *updateNode, float learningRate){
     
     // @attention When updating the weights, only use the BACKWARD connections
     for (int i=0; i<updateNode->backwardConnCount; i++){
@@ -486,9 +486,9 @@ void updateNodeWeights(Node *updateNode, double learningRate){
  * @param thisNode A pointer to the node whose (to be back propagated) error is to be calculated
  */
 
-double calcNodeError(Node *thisNode) {
+float calcNodeError(Node *thisNode) {
    
-    double nodeErrorSum = 0;
+    float nodeErrorSum = 0;
 
     int forwardConnStart = thisNode->backwardConnCount;
     
@@ -530,7 +530,7 @@ void backPropagateNetwork(Network *nn, int targetClassification){
         for (int n=0; n<ol->columns[0].nodeCount; n++){
             Node *on = getNetworkNode(ol,o,n);
             int targetOutput = (o==targetClassification)?1:0;
-            double errorDelta = targetOutput - on->output;
+            float errorDelta = targetOutput - on->output;
             on->errorSum = errorDelta * getDerivative(on->output, ol->layerDef->activationType);
             updateNodeWeights(on, nn->learningRate);
         }
@@ -575,7 +575,7 @@ void feedForwardNetwork(Network *nn){
                 node->output = node->bias;
                 // @attention When calculating node output only loop through the BACKWARD connections
                 //printf("backwardConnCount: %d\n", node->backwardConnCount);
-                double result = 0.0;
+                float result = 0.0;
                 for (int k = 0; k < (1 + node->backwardConnCount / m_per_device[0]); k += 1){ 
                   init_problem2(node, k);
                   result += run2();
@@ -584,7 +584,7 @@ void feedForwardNetwork(Network *nn){
                 }
 /*
                 int count = 0;
-                double temp[180];
+                float temp[180];
                 for(unsigned i = 0; i < num_devices; ++i) {
                   for(unsigned j = 0; j < m_per_device[i]; ++j) {
                       if (count < node->backwardConnCount) temp[count] = out[i][j];
@@ -731,7 +731,7 @@ void initNetworkWeights(Network *nn){
 
 int calcStride(int tgtWidth, int filter, int srcWidth){
     
-  return ceil(((double)tgtWidth - filter)/(srcWidth-1));
+  return ceil(((float)tgtWidth - filter)/(srcWidth-1));
     
 }
 
@@ -767,7 +767,7 @@ void calcFilterColumnIds(Layer *srcLayer, int srcColId, Layer *tgtLayer, Vector 
     int stride = calcStride(tgtWidth, filter, srcWidth);
     
     int startX = (srcColId % srcWidth) * stride;
-    int startY = floor((double)srcColId/srcWidth) * stride;
+    int startY = floor((float)srcColId/srcWidth) * stride;
     
     int id=0;
 
@@ -1030,7 +1030,7 @@ Vector *createFilterColumnIds(Layer *thisLayer, int columnId, Layer *prevLayer){
     // number of values in the vector equals the size of the filter window
     // @attention This is done even for non-convolutional layer because their filter is 0 thus no impact
     int colIdCount = thisLayer->layerDef->filter * thisLayer->layerDef->filter;
-    ByteSize vectorSize = sizeof(Vector) + (colIdCount * sizeof(double));  // TODO don't need "double" here
+    ByteSize vectorSize = sizeof(Vector) + (colIdCount * sizeof(float));  // TODO don't need "float" here
     
     // Calculate a matrix of column/node ids depicting a moving filter/kernel window in the target layer
     Vector *filterColIds = (Vector*)malloc(vectorSize);
@@ -1281,7 +1281,7 @@ void setNetworkDefaults(Network *nn, int layerCount, LayerDefinition *layerDefs,
     for (int l=0; l<layerCount; l++) nn->weightCount += getLayerWeightCount(layerDefs+l);
     
     // Cross-check the network's weight count ("just to make sure :-)")
-    if (nn->weightCount != (double)weightBlockSize/sizeof(Weight)) {
+    if (nn->weightCount != (float)weightBlockSize/sizeof(Weight)) {
         printf("Incorrect weight count! ABORT!");
         exit (1);
     }

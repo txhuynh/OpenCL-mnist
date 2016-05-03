@@ -54,7 +54,7 @@ typedef struct Vector Vector;
 
 struct Vector{
     int count;              // number of values in the vector
-    double vals[];          // array of values inside the vector
+    float vals[];          // array of values inside the vector
 };
 
 

@@ -22,8 +22,8 @@
 #define M 50
 
  // ACL kernel for adding two input vectors
-__kernel void mnist(__global const double *restrict x, 
-                    __global const double *restrict y,
+__kernel void mnist(__global const float * x, 
+                    __global const float * y,
                     __global double *restrict z)
 {
   // get index of the work item

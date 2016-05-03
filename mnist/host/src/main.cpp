@@ -64,9 +64,9 @@ scoped_array<cl_mem> in3_buf; // num_devices elements
 scoped_array<cl_mem> out_buf; // num_devices elements
 
 unsigned M = 50; // problem size
-scoped_array<scoped_aligned_ptr<double> > in1, in2; // num_devices elements
-scoped_array<scoped_aligned_ptr<double> > out; // num_devices elements
-scoped_array<scoped_array<double> > ref_out; // num_devices elements
+scoped_array<scoped_aligned_ptr<float> > in1, in2; // num_devices elements
+scoped_array<scoped_aligned_ptr<float> > out; // num_devices elements
+scoped_array<scoped_array<float> > ref_out; // num_devices elements
 scoped_array<unsigned> m_per_device; // num_devices elements
 
 LayerDefinition *layerDefs;
@@ -284,16 +284,16 @@ bool init_opencl() {
 
     // Input buffers.
     in1_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        m_per_device[i] * sizeof(double), NULL, &status);
+        m_per_device[i] * sizeof(float), NULL, &status);
     checkError(status, "Failed to create buffer for input 1");
 
     in2_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        m_per_device[i] * sizeof(double), NULL, &status);
+        m_per_device[i] * sizeof(float), NULL, &status);
     checkError(status, "Failed to create buffer for input 2");
 
     // Output buffer.
     out_buf[i] = clCreateBuffer(context, CL_MEM_WRITE_ONLY, 
-        m_per_device[i] * sizeof(double), NULL, &status);
+        m_per_device[i] * sizeof(float), NULL, &status);
     checkError(status, "Failed to create buffer for out");
   }
 
@@ -337,7 +337,7 @@ void init_problem2(Node* node, int iteration) {
   }
 }
 //-----------------------------------------------------------------------------
-double run2() {
+float run2() {
   cl_int status;
 
   const double start_time = getCurrentTimestamp();
@@ -353,11 +353,11 @@ double run2() {
     // for the host-to-device transfer.
     cl_event write_event[2];
     status = clEnqueueWriteBuffer(queue[i], in1_buf[i], CL_FALSE,
-        0, m_per_device[i] * sizeof(double), in1[i], 0, NULL, &write_event[0]);
+        0, m_per_device[i] * sizeof(float), in1[i], 0, NULL, &write_event[0]);
     checkError(status, "Failed to transfer input 1");
 
     status = clEnqueueWriteBuffer(queue[i], in2_buf[i], CL_FALSE,
-        0, m_per_device[i] * sizeof(double), in2[i], 0, NULL, &write_event[1]);
+        0, m_per_device[i] * sizeof(float), in2[i], 0, NULL, &write_event[1]);
     checkError(status, "Failed to transfer input 2");
 
     // Set kernel arguments.
@@ -391,7 +391,7 @@ double run2() {
 
     // Read the result. This the final operation.
     status = clEnqueueReadBuffer(queue[i], out_buf[i], CL_FALSE,
-        0, m_per_device[i] * sizeof(double), out[i], 1, &kernel_event[i], &finish_event[i]);
+        0, m_per_device[i] * sizeof(float), out[i], 1, &kernel_event[i], &finish_event[i]);
 
     // Release local events.
     clReleaseEvent(write_event[0]);
@@ -410,7 +410,7 @@ double run2() {
   /*
   for(unsigned i = 0; i < num_devices; ++i) {
     cl_ulong time_ns = getStartEndTime(kernel_event[i]);
-    printf("Kernel time (device %d): %0.3f ms\n", i, double(time_ns) * 1e-6);
+    printf("Kernel time (device %d): %0.3f ms\n", i, float(time_ns) * 1e-6);
   }*/
 
   // Release all events.
@@ -419,7 +419,7 @@ double run2() {
     clReleaseEvent(finish_event[i]);
   }
 
-  double sum = 0.0;
+  float sum = 0.0;
   // Verify results.
   bool pass = true;
   for(unsigned i = 0; i < num_devices && pass; ++i) {

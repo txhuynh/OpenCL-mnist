@@ -223,14 +223,14 @@ MNIST_Label getLabelByPosition(FILE *labelFile, int position){
 
 Vector *getVectorFromImage(MNIST_Image *img){
     
-    Vector *v = (Vector*)malloc(sizeof(Vector) + (MNIST_IMG_WIDTH*MNIST_IMG_HEIGHT * sizeof(double)));
+    Vector *v = (Vector*)malloc(sizeof(Vector) + (MNIST_IMG_WIDTH*MNIST_IMG_HEIGHT * sizeof(float)));
     
     v->count = MNIST_IMG_WIDTH*MNIST_IMG_HEIGHT;
     
     for (int i=0;i<v->count;i++)
-        //        v->vals[i] = ((double)img->pixel[i]/255);     // Image pixels' grey shades (0-255) are normalized to 0-1
+        //        v->vals[i] = ((float)img->pixel[i]/255);     // Image pixels' grey shades (0-255) are normalized to 0-1
         // Pre-processing the input data: subtract mean and normalize
-        v->vals[i] = ((double)(img->pixel[i]-127)/128);
+        v->vals[i] = ((float)(img->pixel[i]-127)/128);
     
     return v;
 }

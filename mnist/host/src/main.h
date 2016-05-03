@@ -4,6 +4,6 @@
 #include "dnn.h"
 
 void init_problem2(Node*, int);
-double run2(void);
+float run2(void);
 void cleanup2(void);
 #endif

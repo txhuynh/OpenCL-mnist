@@ -24,7 +24,7 @@ typedef struct Column Column;
 typedef struct Node Node;
 typedef struct Connection Connection;
 
-typedef double Weight;
+typedef float Weight;
 typedef unsigned long ByteSize;
 
 typedef enum LayerType {EMPTY, INPUT, CONVOLUTIONAL, FULLY_CONNECTED, OUTPUT} LayerType;
@@ -82,8 +82,8 @@ struct Connection{
 struct Node{
     ByteSize size;              // actual byte size of this structure in run-time
     Weight bias;                // value of the bias weight of this node
-    double output;              // result of activation function applied to this node
-    double errorSum;            // result of error back propagation applied to this node
+    float output;              // result of activation function applied to this node
+    float errorSum;            // result of error back propagation applied to this node
     int backwardConnCount;      // number of connections to the previous layer
     int forwardConnCount;       // number of connections to the following layer
     Connection connections[];   // array of connections
@@ -128,7 +128,7 @@ struct Layer{
 
 struct Network{
     ByteSize size;                  // actual byte size of this structure in run-time
-    double learningRate;            // factor by which connection weight changes are applied
+    float learningRate;            // factor by which connection weight changes are applied
     int weightCount;                // number of weights in the net's weight block
     Weight *weightsPtr;             // pointer to the start of the network's weights block
     Weight nullWeight;              // memory slot for a weight pointed to by dead connections

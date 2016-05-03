@@ -28,9 +28,8 @@
 *.app
 
 # executable dir
-mnist/bin/
-mnist/bin_mnist/
+mnist/bin*/
 
 # temp files
-mnist/bin_mnist.aoco
+*.aoco
 *.swp
