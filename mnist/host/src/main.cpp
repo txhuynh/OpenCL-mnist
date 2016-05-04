@@ -43,21 +43,14 @@
 #include "CL/opencl.h"
 #include "AOCLUtils/aocl_utils.h"
 #include <iostream>
-extern "C"{
-#include "libcxl.h"
-}
 #include "dnn.h"
 #include "main.h"
 
 using namespace aocl_utils;
 
-#define DEVICE "/dev/cxl/afu1.0d"
-struct cxl_afu_h *afu = cxl_afu_open_dev ((char*) (DEVICE));
-
 // OpenCL runtime configuration
 cl_platform_id platform = NULL;
-unsigned num_devices = 1;
-unsigned tmp_n_dev; //dummy variable
+unsigned num_devices = 0;
 scoped_array<cl_device_id> device; // num_devices elements
 cl_context context = NULL;
 scoped_array<cl_command_queue> queue; // num_devices elements
@@ -238,6 +231,7 @@ bool init_opencl() {
   }
 
   // Get the OpenCL platform.
+  //platform = findPlatform("Altera");
   platform = findPlatform("Altera");
   if(platform == NULL) {
     printf("ERROR: Unable to find Altera OpenCL platform.\n");
@@ -245,7 +239,7 @@ bool init_opencl() {
   }
 
   // Query the available OpenCL device.
-  device.reset(getDevices(platform, CL_DEVICE_TYPE_ALL, &tmp_n_dev));
+  device.reset(getDevices(platform, CL_DEVICE_TYPE_ALL, &num_devices));
   printf("Platform: %s\n", getPlatformName(platform).c_str());
   printf("Using %d device(s)\n", num_devices);
   for(unsigned i = 0; i < num_devices; ++i) {
@@ -286,6 +280,11 @@ bool init_opencl() {
 
     // Determine the number of elements processed by this device.
     m_per_device[i] = M / num_devices; // number of elements handled by this device
+
+    // Spread out the remainder of the elements over the first
+    if(i < (M % num_devices)) {
+      m_per_device[i]++;
+    }
 
     // Input buffers.
     in1_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY, 
