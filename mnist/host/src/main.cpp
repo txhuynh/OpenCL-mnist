@@ -20,13 +20,16 @@
 // by the laws of the United States of America.
 
 ///////////////////////////////////////////////////////////////////////////////////
-// This host program executes a vector addition kernel to perform:
-//  C = A + B
-// where A, B and C are vectors with N elements.
+// This host program executes a matrix multiplication kernel to perform:
+//  C = A * B
+// where A is a N x K matrix, B is a K x M matrix and C is a N x M matrix.
+// All dimensions must be a multiple of BLOCK_SIZE, which affects the
+// underlying kernel.
 //
 // This host program supports partitioning the problem across multiple OpenCL
 // devices if available. If there are M available devices, the problem is
-// divided so that each device operates on N/M points. The host program
+// divided so that each device operates on N/M rows (with
+// processed by each device is . The host program
 // assumes that all devices are of the same type (that is, the same binary can
 // be used), but the code can be generalized to support different device types
 // easily.
@@ -45,6 +48,7 @@
 #include <iostream>
 #include "dnn.h"
 #include "main.h"
+#include "matrixMult.h"
 
 using namespace aocl_utils;
 
@@ -56,15 +60,22 @@ cl_context context = NULL;
 scoped_array<cl_command_queue> queue; // num_devices elements
 cl_program program = NULL;
 scoped_array<cl_kernel> kernel; // num_devices elements
-scoped_array<cl_mem> in1_buf; // num_devices elements
-scoped_array<cl_mem> in2_buf; // num_devices elements
-scoped_array<cl_mem> in3_buf; // num_devices elements
-scoped_array<cl_mem> out_buf; // num_devices elements
+scoped_array<cl_mem> input_a_buf; // num_devices elements
+scoped_array<cl_mem> input_b_buf; // num_devices elements
+scoped_array<cl_mem> output_buf; // num_devices elements
 
-unsigned M = 50; // problem size
-scoped_array<scoped_aligned_ptr<float> > in1, in2; // num_devices elements
-scoped_array<scoped_aligned_ptr<float> > out; // num_devices elements
-scoped_array<scoped_array<float> > ref_out; // num_devices elements
+// Problem data.
+unsigned A_height = 1 * BLOCK_SIZE; //fill in 0's for other rows
+unsigned A_width  = 13 * BLOCK_SIZE; //64 * 12 = 768
+const unsigned &B_height = A_width;
+unsigned B_width  =  1 * BLOCK_SIZE; //fill in 0's for other cols
+const unsigned &C_height = A_height;
+const unsigned &C_width  = B_width;
+
+scoped_array<scoped_aligned_ptr<float> > input_a; // num_devices elements
+scoped_aligned_ptr<float> input_b;
+scoped_array<scoped_aligned_ptr<float> > output; // num_devices elements
+scoped_array<float> ref_out; // num_devices elements
 scoped_array<unsigned> m_per_device; // num_devices elements
 
 LayerDefinition *layerDefs;
@@ -171,7 +182,17 @@ void testNetwork(Network *nn){
 int main(int argc, char **argv) {
   Options options(argc, argv);
 
-  // Initialize OpenCL.
+  // Spot check matrix sizes. They all must be a multiple of BLOCK_SIZE,
+  // although it is relatively straightforward to handle non-multiples
+  // by adding padding. For simplicity, this example does not pad.
+  if((A_height % BLOCK_SIZE) != 0 || (A_width % BLOCK_SIZE) != 0 ||
+     (B_height % BLOCK_SIZE) != 0 || (B_width % BLOCK_SIZE) != 0 ||
+     (C_height % BLOCK_SIZE) != 0 || (C_width % BLOCK_SIZE) != 0) {
+    printf("Matrix sizes must be a multiple of %d.\n", BLOCK_SIZE);
+    return -1;
+  }
+
+ // Initialize OpenCL.
   if(!init_opencl()) {
     return -1;
   }
@@ -264,10 +285,12 @@ bool init_opencl() {
   queue.reset(num_devices);
   kernel.reset(num_devices);
   m_per_device.reset(num_devices);
-  in1_buf.reset(num_devices);
-  in2_buf.reset(num_devices);
-  out_buf.reset(num_devices);
+  input_a_buf.reset(num_devices);
+  input_b_buf.reset(num_devices);
+  output_buf.reset(num_devices);
  
+  const unsigned num_block_rows = C_height / BLOCK_SIZE;
+
   for(unsigned i = 0; i < num_devices; ++i) {
     // Command queue.
     queue[i] = clCreateCommandQueue(context, device[i], CL_QUEUE_PROFILING_ENABLE, &status);
@@ -279,166 +302,216 @@ bool init_opencl() {
     checkError(status, "Failed to create kernel");
 
     // Determine the number of elements processed by this device.
-    m_per_device[i] = M / num_devices; // number of elements handled by this device
+    m_per_device[i] = num_block_rows / num_devices; // number of elements handled by this device
 
     // Spread out the remainder of the elements over the first
-    if(i < (M % num_devices)) {
+    if(i < (num_block_rows % num_devices)) {
       m_per_device[i]++;
     }
+    m_per_device[i] *= BLOCK_SIZE;
 
     // Input buffers.
-    in1_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        m_per_device[i] * sizeof(float), NULL, &status);
+    input_a_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_BANK_1_ALTERA, 
+        m_per_device[i] * A_width * sizeof(float), NULL, &status);
     checkError(status, "Failed to create buffer for input 1");
 
-    in2_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        m_per_device[i] * sizeof(float), NULL, &status);
+    input_b_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_BANK_2_ALTERA, 
+        B_height * B_width * sizeof(float), NULL, &status);
     checkError(status, "Failed to create buffer for input 2");
 
     // Output buffer.
-    out_buf[i] = clCreateBuffer(context, CL_MEM_WRITE_ONLY, 
-        m_per_device[i] * sizeof(float), NULL, &status);
+    output_buf[i] = clCreateBuffer(context, CL_MEM_WRITE_ONLY | CL_MEM_BANK_1_ALTERA, 
+        m_per_device[i] * C_width * sizeof(float), NULL, &status);
     checkError(status, "Failed to create buffer for out");
   }
 
   return true;
 }
 // Initialize the data for the problem. Requires num_devices to be known.
-void init_problem2(Node* node, int iteration) {
+void init_problem2(Node* node) {
   if(num_devices == 0) {
     checkError(-1, "No devices");
   }
 
-  in1.reset(num_devices);
-  in2.reset(num_devices);
-  out.reset(num_devices);
-  ref_out.reset(num_devices);
+  input_a.reset(num_devices);
+  input_b.reset(B_height * B_width);
+  output.reset(num_devices);
 
   for(unsigned i = 0; i < num_devices; ++i) {
-    in1[i].reset(m_per_device[i]);
-    in2[i].reset(m_per_device[i]);
-    out[i].reset(m_per_device[i]);
-    ref_out[i].reset(m_per_device[i]);
+    input_a[i].reset(m_per_device[i] * A_width);
+    output[i].reset(m_per_device[i] * C_width);
 
-    int count = iteration * m_per_device[i];
-    for(unsigned j = iteration * m_per_device[i]; j < (iteration+1) * m_per_device[i]; ++j) {
-      unsigned k = j % m_per_device[i];
-      if (count < node->backwardConnCount){
+    for(unsigned j = 0; j < node->backwardConnCount; ++j){
         Node *targetNode = node->connections[j].nodePtr;
-        //std::cout << "here count = " << count << " of " << node->backwardConnCount << "\n"; //TODO: delete
         if (targetNode != NULL){
-          in1[i][k] = *node->connections[j].weightPtr;
-          in2[i][k] = targetNode->output;
-          ref_out[i][k] = in1[i][k] * in2[i][k];
-        } else {  in1[i][k] = 0; in2[i][k] = 0; ref_out[i][k] = 0; }
-      } else { 
-        in1[i][k] = 0; in2[i][k] = 0; ref_out[i][k] = 0;
-      }
-      std::cout << j << ". w = " << in1[i][k] << " ; o = " << in2[i][k] << std::endl; //TODO: delete
-      
-      count += 1;
+          input_a[i][j] = *node->connections[j].weightPtr;
+          input_b[j * B_width + i] = targetNode->output;
+        } else {  
+          input_a[i][j] = 0; 
+          input_b[j * B_width + i] = 0;
+        }
+        std::cout << j << ". w = " << input_a[i][j] << " ; o = " << input_b[j * B_width + i] << std::endl; //TODO: delete
+
     }
+    if (node->backwardConnCount > m_per_device[i] * A_width) { printf("ERROR: data > input_matrix %d %d\n",node->backwardConnCount,m_per_device[i] * A_width); exit(1); }
+
+    printf(" here 2: %d %d\n", node->backwardConnCount, m_per_device[i] * A_width); exit(0);
+    for(unsigned j = node->backwardConnCount; j < m_per_device[i] * A_width; ++j) { 
+      input_a[i][j] = 0;
+      input_b[j * B_width + i] = 0;
+  printf("here 3-----\n");
+    }
+  }
+}
+//-----------------------------------------------------------------------------
+void compute_reference() {
+  // Compute the reference output.
+  printf("Computing reference output\n");
+  ref_out.reset(C_height * C_width);
+
+  for(unsigned y = 0, dev_index = 0; y < C_height; ++dev_index) {
+    for(unsigned yy = 0; yy < m_per_device[dev_index]; ++yy, ++y) {
+      for(unsigned x = 0; x < C_width; ++x) {
+        // Compute result for C(y, x)
+        float sum = 0.0f;
+        for(unsigned k = 0; k < A_width; ++k) {
+          sum += input_a[dev_index][yy * A_width + k] * input_b[k * B_width + x];
+        }
+        ref_out[y * C_width + x] = sum;
+      }
+    }
+  }
+}
+//-----------------------------------------------------------------------------
+void verify() {
+  printf("Verifying\n");
+
+  // Compute the L^2-Norm of the difference between the output and reference
+  // output matrices and compare it against the L^2-Norm of the reference.
+  float diff = 0.0f;
+  float ref = 0.0f;
+  for(unsigned y = 0, dev_index = 0; y < C_height; ++dev_index) {
+    for(unsigned yy = 0; yy < m_per_device[dev_index]; ++yy, ++y) {
+      for(unsigned x = 0; x < C_width; ++x) {
+        const float o = output[dev_index][yy * C_width + x];
+        const float r = ref_out[y * C_width + x];
+        const float d = o - r;
+        diff += d * d;
+        ref += r * r;
+      }
+    }
+  }
+
+  const float diff_l2norm = sqrtf(diff);
+  const float ref_l2norm = sqrtf(ref);
+  const float error = diff_l2norm / ref_l2norm;
+  const bool pass = error < 1e-6;
+  printf("Verification: %s\n", pass ? "PASS" : "FAIL");
+  if(!pass) {
+    printf("Error (L^2-Norm): %0.3g\n", error);
   }
 }
 //-----------------------------------------------------------------------------
 float run2() {
   cl_int status;
 
-  const double start_time = getCurrentTimestamp();
-
-  // Launch the problem for each device.
-  scoped_array<cl_event> kernel_event(num_devices);
-  scoped_array<cl_event> finish_event(num_devices);
-
+  // Transfer inputs to each device. Each of the host buffers supplied to
+  // clEnqueueWriteBuffer here is already aligned to ensure that DMA is used
+  // for the host-to-device transfer.
   for(unsigned i = 0; i < num_devices; ++i) {
-
-    // Transfer inputs to each device. Each of the host buffers supplied to
-    // clEnqueueWriteBuffer here is already aligned to ensure that DMA is used
-    // for the host-to-device transfer.
-    cl_event write_event[2];
-    status = clEnqueueWriteBuffer(queue[i], in1_buf[i], CL_FALSE,
-        0, m_per_device[i] * sizeof(float), in1[i], 0, NULL, &write_event[0]);
+    status = clEnqueueWriteBuffer(queue[i], input_a_buf[i], CL_FALSE,
+        0, m_per_device[i] * A_width * sizeof(float), input_a[i], 0, NULL, NULL);
     checkError(status, "Failed to transfer input 1");
 
-    status = clEnqueueWriteBuffer(queue[i], in2_buf[i], CL_FALSE,
-        0, m_per_device[i] * sizeof(float), in2[i], 0, NULL, &write_event[1]);
+    status = clEnqueueWriteBuffer(queue[i], input_b_buf[i], CL_FALSE,
+        0, B_width * B_height * sizeof(float), input_b, 0, NULL, NULL);
     checkError(status, "Failed to transfer input 2");
+  }
+  // Wait for all queues to finish.
+  for(unsigned i = 0; i < num_devices; ++i) {
+    clFinish(queue[i]);
+  }
 
+  // Launch kernels.
+  // This is the portion of time that we'll be measuring for throughput
+  // benchmarking.
+  scoped_array<cl_event> kernel_event(num_devices);
+
+  const double start_time = getCurrentTimestamp();
+  for(unsigned i = 0; i < num_devices; ++i) {
     // Set kernel arguments.
     unsigned argi = 0;
 
-    status = clSetKernelArg(kernel[i], argi++, sizeof(cl_mem), &in1_buf[i]);
+    status = clSetKernelArg(kernel[i], argi++, sizeof(cl_mem), &output_buf[i]);
     checkError(status, "Failed to set argument %d", argi - 1);
 
-    status = clSetKernelArg(kernel[i], argi++, sizeof(cl_mem), &in2_buf[i]);
+    status = clSetKernelArg(kernel[i], argi++, sizeof(cl_mem), &input_a_buf[i]);
     checkError(status, "Failed to set argument %d", argi - 1);
 
-    status = clSetKernelArg(kernel[i], argi++, sizeof(cl_mem), &out_buf[i]);
+    status = clSetKernelArg(kernel[i], argi++, sizeof(cl_mem), &input_b_buf[i]);
+    checkError(status, "Failed to set argument %d", argi - 1);
+
+    status = clSetKernelArg(kernel[i], argi++, sizeof(A_width), &A_width);
+    checkError(status, "Failed to set argument %d", argi - 1);
+
+    status = clSetKernelArg(kernel[i], argi++, sizeof(B_width), &B_width);
     checkError(status, "Failed to set argument %d", argi - 1);
 
     // Enqueue kernel.
-    // Use a global work size corresponding to the number of elements to add
-    // for this device.
+    // Use a global work size corresponding to the size of the output matrix.
+    // Each work-item computes the result for one value of the output matrix,
+    // so the global work size has the same dimensions as the output matrix.
     // 
-    // We don't specify a local work size and let the runtime choose
-    // (it'll choose to use one work-group with the same size as the global
-    // work-size).
+    // The local work size is one block, so BLOCK_SIZE x BLOCK_SIZE.
     //
     // Events are used to ensure that the kernel is not launched until
     // the writes to the input buffers have completed.
-    const size_t global_work_size = m_per_device[i];
-    //printf("Launching for device %d (%d elements)\n", i, global_work_size);
+    const size_t global_work_size[2] = {C_width, m_per_device[i]};
+    const size_t local_work_size[2]  = {BLOCK_SIZE, BLOCK_SIZE};
+    //printf("Launching for device %d (global size: %d, %d)\n", i, global_work_size[0], global_work_size[1]);
 
-    status = clEnqueueNDRangeKernel(queue[i], kernel[i], 1, NULL,
-        &global_work_size, NULL, 2, write_event, &kernel_event[i]);
+    status = clEnqueueNDRangeKernel(queue[i], kernel[i], 2, NULL,
+        global_work_size, local_work_size, 0, NULL, &kernel_event[i]);
     checkError(status, "Failed to launch kernel");
-
-    // Read the result. This the final operation.
-    status = clEnqueueReadBuffer(queue[i], out_buf[i], CL_FALSE,
-        0, m_per_device[i] * sizeof(float), out[i], 1, &kernel_event[i], &finish_event[i]);
-
-    // Release local events.
-    clReleaseEvent(write_event[0]);
-    clReleaseEvent(write_event[1]);
   }
 
-  // Wait for all devices to finish.
-  clWaitForEvents(num_devices, finish_event);
+  // Wait for all kernels to finish.
+  clWaitForEvents(num_devices, kernel_event);
 
   const double end_time = getCurrentTimestamp();
+  const double total_time = end_time - start_time;
 
   // Wall-clock time taken.
-  //printf("\nTime: %0.3f ms\n", (end_time - start_time) * 1e3);
+  printf("\nTime: %0.3f ms\n", total_time * 1e3);
 
   // Get kernel times using the OpenCL event profiling API.
-  /*
   for(unsigned i = 0; i < num_devices; ++i) {
     cl_ulong time_ns = getStartEndTime(kernel_event[i]);
-    printf("Kernel time (device %d): %0.3f ms\n", i, float(time_ns) * 1e-6);
-  }*/
-
-  // Release all events.
-  for(unsigned i = 0; i < num_devices; ++i) {
-    clReleaseEvent(kernel_event[i]);
-    clReleaseEvent(finish_event[i]);
+    printf("Kernel time (device %d): %0.3f ms\n", i, double(time_ns) * 1e-6);
   }
 
-  float sum = 0.0;
-  // Verify results.
-  bool pass = true;
-  for(unsigned i = 0; i < num_devices && pass; ++i) {
-    for(unsigned j = 0; j < m_per_device[i] && pass; ++j) {
-      sum += out[i][j];
-      if(fabsf(out[i][j] - ref_out[i][j]) > 1.0e-5f) {
-        printf("Failed verification @ device %d, index %d\nOutput: %f\nReference: %f\n",
-            i, j, out[i][j], ref_out[i][j]);
-        pass = false;
-      }
-    }
-  } 
-  printf("\nVerification: %s\n", pass ? "PASS" : "FAIL");
+  // Compute the throughput (GFLOPS).
+  // There are C_width * C_height output values, with each value
+  // computed using A_width multiplies and adds.
+  const float flops = (float)(2.0f * C_width * C_height * A_width / total_time);
+  printf("\nThroughput: %0.2f GFLOPS\n\n", flops * 1e-9);
 
-  return sum;
+  // Release kernel events.
+  for(unsigned i = 0; i < num_devices; ++i) {
+    clReleaseEvent(kernel_event[i]);
+  }
+
+  // Read the result.
+  for(unsigned i = 0; i < num_devices; ++i) {
+    status = clEnqueueReadBuffer(queue[i], output_buf[i], CL_TRUE,
+        0, m_per_device[i] * C_width * sizeof(float), output[i], 0, NULL, NULL);
+    checkError(status, "Failed to read output matrix");
+  }
+
+  // Verify results.
+  compute_reference();
+  verify();
+  return output[0][0];
 }
 //-----------------------------------------------------------------------------
 void cleanup2() {
@@ -449,14 +522,14 @@ void cleanup2() {
     if(queue && queue[i]) {
       clReleaseCommandQueue(queue[i]);
     }
-    if(in1_buf && in1_buf[i]) {
-      clReleaseMemObject(in1_buf[i]);
+    if(input_a_buf && input_a_buf[i]) {
+      clReleaseMemObject(input_a_buf[i]);
     }
-    if(in2_buf && in2_buf[i]) {
-      clReleaseMemObject(in2_buf[i]);
+    if(input_b_buf && input_b_buf[i]) {
+      clReleaseMemObject(input_b_buf[i]);
     }
-    if(out_buf && out_buf[i]) {
-      clReleaseMemObject(out_buf[i]);
+    if(output_buf && output_buf[i]) {
+      clReleaseMemObject(output_buf[i]);
     }
   }
 

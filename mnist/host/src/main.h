@@ -3,7 +3,7 @@
 
 #include "dnn.h"
 
-void init_problem2(Node*, int);
+void init_problem2(Node*);
 float run2(void);
 void cleanup2(void);
 #endif

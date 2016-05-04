@@ -576,12 +576,13 @@ void feedForwardNetwork(Network *nn){
                 // @attention When calculating node output only loop through the BACKWARD connections
                 //printf("backwardConnCount: %d\n", node->backwardConnCount);
                 float result = 0.0;
-                for (int k = 0; k < (1 + node->backwardConnCount / m_per_device[0]); k += 1){ 
-                  init_problem2(node, k);
+//                for (int k = 0; k < (1 + node->backwardConnCount / m_per_device[0]); k += 1){ 
+                  init_problem2(node);
                   result += run2();
                   std::cout << "result = " << result << std::endl; //TODO: delete
-                  //if (n==5){ cleanup2(); exit(0); }//TODO: delete
-                }
+                  
+                  if (n==5){ cleanup2(); exit(0); }//TODO: delete
+//                }
 /*
                 int count = 0;
                 float temp[180];
