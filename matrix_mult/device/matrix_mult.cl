@@ -100,7 +100,7 @@
 __kernel 
 __attribute((reqd_work_group_size(BLOCK_SIZE,BLOCK_SIZE,1)))
 __attribute((num_simd_work_items(SIMD_WORK_ITEMS)))
-void mnist( // Input and output matrices
+void matrixMult( // Input and output matrices
                  __global float *restrict C,
                  __global float *A,
                  __global float *B, 

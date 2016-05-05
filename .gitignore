@@ -28,8 +28,9 @@
 *.app
 
 # executable dir
-mnist/bin*/
+matrix_mult/bin*/
 
 # temp files
 *.aoco
 *.swp
+matrix_mult/bin*

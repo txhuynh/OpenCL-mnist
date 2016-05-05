@@ -25,16 +25,16 @@ by the laws of the United States of America.
 <head>
 <meta charset="utf-8"/>
 <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
-<title>Vector Add: Altera&reg; OpenCL&trade; Design Example</title>
+<title>Matrix Multiplication: Altera&reg; OpenCL&trade; Design Example</title>
 <link rel="stylesheet" href="../common/readme.css" type="text/css">
 </head>
 <body>
 <h1>
 <div class="preheading">Altera<sup>&reg;</sup> OpenCL&trade; Design Example</div>
-Vector Add
+Matrix Multiplication
 </h1>
 
-<p>This readme file for the Vector Add OpenCL Design Example contains
+<p>This readme file for the Matrix Multiplication OpenCL Design Example contains
 information about the design example package. For more examples, please
 visit the <a href="http://www.altera.com/support/examples/opencl/opencl.html">
 Altera OpenCL Design Examples page</a>.</p>
@@ -54,16 +54,14 @@ Altera OpenCL Design Examples page</a>.</p>
 </nav>
 <section>
 <a id="Description"><h2>Description</h2></a>
-<p>This example runs a basic OpenCL kernel that performs
-      <span class="mono">C = A + B</span>
-      where <span class="mono">A</span>, <span class="mono">B</span> and <span class="mono">C</span> are <span class="mono">N</span>-element vectors. The kernel is intentionally
-      kept simple and not optimized to achieve maximum performance on
-      the FPGA.</p><p>In addition to demonstrating the basic OpenCL API, this example supports
-      partitioning the problem across multiple OpenCL devices, if available. 
-      If there are <span class="mono">M</span> available devices, the problem is divided so that each device operates 
-      on <span class="mono">N/M</span> points. The host program assumes that all devices are of the same type (that is, 
-      the same binary can be used, but the code can be generalized to support different 
-      device types easily.</p>
+<p>This example provides a kernel that implements the standard matrix multiplication
+      operation <span class="mono">C = A × B</span>, where</p><ul style="list-style-type: none">
+        <li><span class="mono">A</span> is a <span class="mono">N × K</span> matrix, and</li>
+        <li><span class="mono">B</span> is a <span class="mono">K × M</span> matrix, and</li>
+        <li><span class="mono">C</span> is a <span class="mono">N × M</span> matrix.</li>
+      </ul><p>The kernel uses the standard loop tiling optimization to take advantage of data reuse
+      among different output values. Each tile has the dimensions of <span class="mono">BLOCK_SIZE × BLOCK_SIZE</span>,
+      where the value of <span class="mono">BLOCK_SIZE</span> is fixed at kernel compilation time.</p>
 </section>
 
 <section>
@@ -91,7 +89,7 @@ Altera OpenCL Design Examples page</a>.</p>
 </thead>
 <tbody>
 <tr>
-  <td class="path"><a href="./" style="padding-left: 0.0ex">vector_add/</a></td>
+  <td class="path"><a href="./" style="padding-left: 0.0ex">matrix_mult/</a></td>
   <td class="desc"></td>
 </tr>
 <tr>
@@ -107,12 +105,16 @@ Altera OpenCL Design Examples page</a>.</p>
   <td class="desc">OpenCL kernel files</td>
 </tr>
 <tr>
-  <td class="path"><a href="./device/vector_add.cl" style="padding-left: 4.0ex">vector_add.cl</a></td>
+  <td class="path"><a href="./device/matrix_mult.cl" style="padding-left: 4.0ex">matrix_mult.cl</a></td>
   <td class="desc">Top-level OpenCL kernel file</td>
 </tr>
 <tr>
   <td class="path"><a href="./host/" style="padding-left: 2.0ex">host/</a></td>
   <td class="desc"></td>
+</tr>
+<tr>
+  <td class="path"><a href="./host/inc/" style="padding-left: 4.0ex">inc/</a></td>
+  <td class="desc">Host include files</td>
 </tr>
 <tr>
   <td class="path"><a href="./host/src/" style="padding-left: 4.0ex">src/</a></td>
@@ -125,11 +127,11 @@ Altera OpenCL Design Examples page</a>.</p>
 
 <section>
 <a id="Compiling_the_OpenCL_Kernel"><h2>Compiling the OpenCL Kernel</h2></a>
-    <p>The top-level OpenCL kernel file is <span class="mono">device/vector_add.cl</span>.</p>
+    <p>The top-level OpenCL kernel file is <span class="mono">device/matrix_mult.cl</span>.</p>
     <p>To compile the OpenCL kernel, run:</p>
-    <div class="command">aoc device/vector_add.cl <span class="nowrap">-o</span> bin/vector_add.aocx --board <span class="highlight">&lt;<i>board</i>&gt;</span></div>
+    <div class="command">aoc device/matrix_mult.cl <span class="nowrap">-o</span> bin/matrix_mult.aocx<span class="nowrap"></span> <span class="nowrap">--fp-relaxed</span> <span class="nowrap">--fpc</span> <span class="nowrap">--no-interleaving</span> <span class="nowrap">default</span> --board <span class="highlight">&lt;<i>board</i>&gt;</span></div>
     <p>where <span class="highlight mono">&lt;<i>board</i>&gt;</span> matches the board you want to target.
-    The <span class="mono">-o bin/vector_add.aocx</span> argument is used to place the compiled binary
+    The <span class="mono">-o bin/matrix_mult.aocx</span> argument is used to place the compiled binary
     in the location that the host program expects.
     </p>
 <p>If you are unsure of the boards available, use the following command to list
@@ -138,8 +140,39 @@ available boards:</p>
 <section>
 <h3>Compiling for Emulator</h3>
 <p>To use the emulation flow, the compilation command just needs to be modified slightly:</p>
-<div class="command">aoc <span class="highlight nowrap">-march=emulator</span> device/vector_add.cl -o bin/vector_add.aocx --board &lt;<i>board</i>&gt;</div>
+<div class="command">aoc <span class="highlight nowrap">-march=emulator</span> device/matrix_mult.cl -o bin/matrix_mult.aocx<span class="nowrap"></span> <span class="nowrap">--fp-relaxed</span> <span class="nowrap">--fpc</span> <span class="nowrap">--no-interleaving</span> <span class="nowrap">default</span> --board &lt;<i>board</i>&gt;</div>
 </section>
+<section>
+<h3>Kernel Preprocessor Definitions</h3>
+<p>The kernel has the following preprocessor definitions:</p>
+<table class="kernel-defines parameters">
+<thead>
+<tr>
+  <th class="name">Define</th>
+  <th class="type">Type</th>
+  <th class="default">Default</th>
+  <th class="desc">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td class="name">-D<span class="highlight">BLOCK_SIZE</span>=&lt;<i>#</i>&gt;</td>
+  <td class="type">Optional</td>
+  <td class="default">64</td>
+  <td class="desc">
+          The OpenCL kernel is a blocked matrix multiplication with a block size of <span class="mono">BLOCK_SIZE × BLOCK_SIZE</span>. The value of <span class="mono">BLOCK_SIZE</span> affects the amount of on-chip memory used and the performance of the kernel. Higher values lead to higher performance. The same value must be used for kernel and host compilation.
+        </td>
+</tr>
+<tr>
+  <td class="name">-D<span class="highlight">SIMD_WORK_ITEMS</span>=&lt;<i>#</i>&gt;</td>
+  <td class="type">Optional</td>
+  <td class="default">4</td>
+  <td class="desc">
+          This controls the <span class="mono">num_simd_work_items</span> kernel attribute. The value should be set based on available resources on the FPGA device. Higher values lead to higher performance.
+        </td>
+</tr>
+</tbody>
+</table>
 
 </section>
 
@@ -147,7 +180,32 @@ available boards:</p>
 <a id="Compiling_the_Host_Program"><h2>Compiling the Host Program</h2></a>
 <p>To compile the host program, run:</p>
 <div class="command">make</div>
-<p>The compiled host program will be located at <span class="mono">bin/vector_add</span>.</p>
+<p>The compiled host program will be located at <span class="mono">bin/matrix_mult</span>.</p>
+<section>
+<h3>Host Preprocessor Definitions</h3>
+<p>The host program has the following preprocessor definitions:</p>
+<table class="host-defines parameters">
+<thead>
+<tr>
+  <th class="name">Define</th>
+  <th class="type">Type</th>
+  <th class="default">Default</th>
+  <th class="desc">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td class="name">-D<span class="highlight">BLOCK_SIZE</span>=&lt;<i>#</i>&gt;</td>
+  <td class="type">Optional</td>
+  <td class="default">64</td>
+  <td class="desc">
+          This value must be the same as the one used when compiling the kernel.
+        </td>
+</tr>
+</tbody>
+</table>
+<p>On Linux, custom values for preprocessor defines can be specified by setting 
+the value of <mono>CPPFLAGS</mono> when invoking the Makefile.</p>
 
 </section>
 
@@ -155,22 +213,19 @@ available boards:</p>
 <a id="Running_the_Host_Program"><h2>Running the Host Program</h2></a>
 <p>Before running the host program, you should have compiled the OpenCL kernel and the host program. Refer to the above sections if you have not completed those steps.</p>
 <p>To run the host program on hardware, execute:</p>
-<div class="command">bin/vector_add</div>
-<p>The output will include a wall-clock time of the OpenCL execution time
-        and the kernel time as reported by the OpenCL event profiling API. The host
-        program includes verification against the host CPU, printing out "PASS"
-        when the results match.</p><section>
+<div class="command">bin/matrix_mult</div>
+<section>
 <h3>Running with the Emulator</h3>
 <p>Prior to running the emulation flow, ensure that you have compiled the kernel for emulation. 
 Refer to the above sections if you have not done so. Also, please set up your environment for
 emulation. Please see the <a href="http://www.altera.com/literature/hb/opencl-sdk/aocl_programming_guide.pdf">Altera SDK for OpenCL Programming Guide</a> for more information.</p>
 <p>For this example design, the suggested emulation command is:</p>
-<div class="command">bin/vector_add <span class="nowrap">-n=10000</span></div>
+<div class="command">bin/matrix_mult <span class="nowrap">-ah=512</span> <span class="nowrap">-aw=512</span> <span class="nowrap">-bw=512</span></div>
 <section>
 <h3>Host Parameters</h3>
 <p>The general command-line for the host program is:</p>
-<div class="command">bin/vector_add <span class="nowrap">[-<span class="highlight">n</span>=&lt;<i>integer</i>&gt;]</span></div>
-<p>where the one parameter is:</p>
+<div class="command">bin/matrix_mult <span class="nowrap">[-<span class="highlight">ah</span>=&lt;<i>#</i>&gt;]</span> <span class="nowrap">[-<span class="highlight">aw</span>=&lt;<i>#</i>&gt;]</span> <span class="nowrap">[-<span class="highlight">bw</span>=&lt;<i>#</i>&gt;]</span></div>
+<p>where the parameters are:</p>
 <table class="host-params parameters">
 <thead>
 <tr>
@@ -182,10 +237,28 @@ emulation. Please see the <a href="http://www.altera.com/literature/hb/opencl-sd
 </thead>
 <tbody>
 <tr>
-  <td class="name">-<span class="highlight">n</span>=&lt;<i>integer</i>&gt;</td>
+  <td class="name">-<span class="highlight">ah</span>=&lt;<i>#</i>&gt;</td>
   <td class="type">Optional</td>
-  <td class="default">100000</td>
-  <td class="desc">Number of values to add.</td>
+  <td class="default">32 &times; BLOCK_SIZE</td>
+  <td class="desc">
+          Height of matrix <span class="mono">A</span>. Must be a multiple of <span class="mono">BLOCK_SIZE</span>.
+        </td>
+</tr>
+<tr>
+  <td class="name">-<span class="highlight">aw</span>=&lt;<i>#</i>&gt;</td>
+  <td class="type">Optional</td>
+  <td class="default">16 &times; BLOCK_SIZE</td>
+  <td class="desc">
+          Width of matrix <span class="mono">A</span>. Must be a multiple of <span class="mono">BLOCK_SIZE</span>.
+        </td>
+</tr>
+<tr>
+  <td class="name">-<span class="highlight">bw</span>=&lt;<i>#</i>&gt;</td>
+  <td class="type">Optional</td>
+  <td class="default">16 &times; BLOCK_SIZE</td>
+  <td class="desc">
+          Width of matrix <span class="mono">B</span>. Must be a multiple of <span class="mono">BLOCK_SIZE</span>.
+        </td>
 </tr>
 </tbody>
 </table>
@@ -198,8 +271,8 @@ emulation. Please see the <a href="http://www.altera.com/literature/hb/opencl-sd
 <p>By default, the host program will look for a binary file in the following order (earlier pattern matches 
 take priority):</p>
 <ol>
-  <li>A file named <span class="mono">vector_add.aocx</span>.</li>
-  <li>A file named <span class="mono">vector_add_<span class="highlight">&lt;<i>board</i>&gt;</span>_150.aocx</span>, 
+  <li>A file named <span class="mono">matrix_mult.aocx</span>.</li>
+  <li>A file named <span class="mono">matrix_mult_<span class="highlight">&lt;<i>board</i>&gt;</span>_150.aocx</span>, 
   where <span class="highlight mono">&lt;<i>board</i>&gt;</span> is the name of the board (as passed as the 
   <span class="mono">--board</span> argument to <span class="mono">aoc</span>).</li>
 </ol>
@@ -230,7 +303,7 @@ take priority):</p>
   <td class="version">1.2</td>
   <td class="sdk-version">14.0</td>
   <td class="date">July 2014</td>
-  <td class="changes"><ul><li>Update documentation for 14.0 release.</li></ul></td>
+  <td class="changes"><ul><li>Update kernel compilation flags documentation for 14.0 release.</li></ul></td>
 </tr>
 <tr>
   <td class="version">1.1</td>

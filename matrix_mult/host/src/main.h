@@ -6,4 +6,7 @@
 void init_problem2(Node*);
 float run2(void);
 void cleanup2(void);
+
+void init_problem(void);
+void run(void);
 #endif

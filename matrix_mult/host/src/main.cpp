@@ -37,18 +37,14 @@
 // Verification is performed against the same computation on the host CPU.
 ///////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _main_cpp
-#define _main_cpp
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <iostream>
 #include "CL/opencl.h"
 #include "AOCLUtils/aocl_utils.h"
-#include <iostream>
-#include "dnn.h"
-#include "main.h"
 #include "matrixMult.h"
+#include "main.h"
 
 using namespace aocl_utils;
 
@@ -65,24 +61,30 @@ scoped_array<cl_mem> input_b_buf; // num_devices elements
 scoped_array<cl_mem> output_buf; // num_devices elements
 
 // Problem data.
-unsigned A_height = 1 * BLOCK_SIZE; //fill in 0's for other rows
-unsigned A_width  = 13 * BLOCK_SIZE; //64 * 12 = 768
+unsigned A_height = 1 * BLOCK_SIZE;//32 * BLOCK_SIZE;
+unsigned A_width  = 49 * BLOCK_SIZE;//16 * BLOCK_SIZE;
 const unsigned &B_height = A_width;
-unsigned B_width  =  1 * BLOCK_SIZE; //fill in 0's for other cols
+unsigned B_width  = 1 * BLOCK_SIZE;//16 * BLOCK_SIZE;
 const unsigned &C_height = A_height;
 const unsigned &C_width  = B_width;
 
 scoped_array<scoped_aligned_ptr<float> > input_a; // num_devices elements
 scoped_aligned_ptr<float> input_b;
 scoped_array<scoped_aligned_ptr<float> > output; // num_devices elements
-scoped_array<float> ref_out; // num_devices elements
-scoped_array<unsigned> m_per_device; // num_devices elements
+scoped_array<float> ref_output;
+scoped_array<unsigned> rows_per_device; // num_devices elements
 
 LayerDefinition *layerDefs;
 Network *nn;
 
 // Function prototypes
+float rand_float();
 bool init_opencl();
+void init_problem();
+void run();
+void compute_reference();
+void verify();
+void cleanup();
 
 /**
  * @brief Trains a network on the MNIST training set
@@ -122,7 +124,7 @@ void trainNetwork(Network *nn){
 
         // Display progress during training
         //displayTrainingProgress(imgCount, errCount);
-        if (imgCount % 10 == 0) //TODO: delete
+        if (imgCount % 1000 == 0) //TODO: delete
           printf("Images trained = %d\n", imgCount);
     }
     
@@ -181,6 +183,18 @@ void testNetwork(Network *nn){
 // Entry point.
 int main(int argc, char **argv) {
   Options options(argc, argv);
+  if(options.has("ah")) {
+    A_height = options.get<unsigned>("ah");
+  }
+  if(options.has("aw")) {
+    A_width = options.get<unsigned>("aw");
+  }
+  if(options.has("bw")) {
+    B_width = options.get<unsigned>("bw");
+  }
+
+  printf("Matrix sizes:\n  A: %d x %d\n  B: %d x %d\n  C: %d x %d\n",
+      A_height, A_width, B_height, B_width, C_height, C_width);
 
   // Spot check matrix sizes. They all must be a multiple of BLOCK_SIZE,
   // although it is relatively straightforward to handle non-multiples
@@ -192,7 +206,7 @@ int main(int argc, char **argv) {
     return -1;
   }
 
- // Initialize OpenCL.
+  // Initialize OpenCL.
   if(!init_opencl()) {
     return -1;
   }
@@ -234,12 +248,17 @@ int main(int argc, char **argv) {
     free(layerDefs);
 
   // Free the resources allocated
-  cleanup2();
+  cleanup();
 
   return 0;
 }
 
 /////// HELPER FUNCTIONS ///////
+
+// Randomly generate a floating-point number between -10 and 10.
+float rand_float() {
+  return float(rand()) / float(RAND_MAX) * 20.0f - 10.0f;
+}
 
 // Initializes the OpenCL objects.
 bool init_opencl() {
@@ -252,7 +271,6 @@ bool init_opencl() {
   }
 
   // Get the OpenCL platform.
-  //platform = findPlatform("Altera");
   platform = findPlatform("Altera");
   if(platform == NULL) {
     printf("ERROR: Unable to find Altera OpenCL platform.\n");
@@ -273,7 +291,7 @@ bool init_opencl() {
 
   // Create the program for all device. Use the first device as the
   // representative device (assuming all device are of the same type).
-  std::string binary_file = getBoardBinaryFile("mnist", device[0]);
+  std::string binary_file = getBoardBinaryFile("matrix_mult", device[0]);
   printf("Using AOCX: %s\n", binary_file.c_str());
   program = createProgramFromBinary(context, binary_file.c_str(), device, num_devices);
 
@@ -284,11 +302,11 @@ bool init_opencl() {
   // Create per-device objects.
   queue.reset(num_devices);
   kernel.reset(num_devices);
-  m_per_device.reset(num_devices);
+  rows_per_device.reset(num_devices);
   input_a_buf.reset(num_devices);
   input_b_buf.reset(num_devices);
   output_buf.reset(num_devices);
- 
+
   const unsigned num_block_rows = C_height / BLOCK_SIZE;
 
   for(unsigned i = 0; i < num_devices; ++i) {
@@ -297,124 +315,78 @@ bool init_opencl() {
     checkError(status, "Failed to create command queue");
 
     // Kernel.
-    const char *kernel_name = "mnist";
+    const char *kernel_name = "matrixMult";
     kernel[i] = clCreateKernel(program, kernel_name, &status);
     checkError(status, "Failed to create kernel");
 
-    // Determine the number of elements processed by this device.
-    m_per_device[i] = num_block_rows / num_devices; // number of elements handled by this device
+    // Determine the number of rows processed by this device.
+    // First do this computation in block-rows.
+    rows_per_device[i] = num_block_rows / num_devices; // this is the number of block-rows
 
-    // Spread out the remainder of the elements over the first
+    // Spread out the remainder of the block-rows over the first
+    // N % num_devices.
     if(i < (num_block_rows % num_devices)) {
-      m_per_device[i]++;
+      rows_per_device[i]++;
     }
-    m_per_device[i] *= BLOCK_SIZE;
+
+    // Multiply by BLOCK_SIZE to get the actual number of rows.
+    rows_per_device[i] *= BLOCK_SIZE;
 
     // Input buffers.
+    // For matrix A, each device only needs the rows corresponding
+    // to the rows of the output matrix. We specifically
+    // assign this buffer to the first bank of global memory.
     input_a_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_BANK_1_ALTERA, 
-        m_per_device[i] * A_width * sizeof(float), NULL, &status);
-    checkError(status, "Failed to create buffer for input 1");
+        rows_per_device[i] * A_width * sizeof(float), NULL, &status);
+    checkError(status, "Failed to create buffer for input A");
 
+    // For matrix B, each device needs the whole matrix. We specifically
+    // assign this buffer to the second bank of global memory.
     input_b_buf[i] = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_BANK_2_ALTERA, 
         B_height * B_width * sizeof(float), NULL, &status);
-    checkError(status, "Failed to create buffer for input 2");
+    checkError(status, "Failed to create buffer for input B");
 
-    // Output buffer.
+    // Output buffer. This is matrix C, for the rows that are computed by this
+    // device. We assign this buffer to the first bank of global memory,
+    // although it is not material to performance to do so because
+    // the reads from the input matrices are far more frequent than the
+    // write to the output matrix.
     output_buf[i] = clCreateBuffer(context, CL_MEM_WRITE_ONLY | CL_MEM_BANK_1_ALTERA, 
-        m_per_device[i] * C_width * sizeof(float), NULL, &status);
-    checkError(status, "Failed to create buffer for out");
+        rows_per_device[i] * C_width * sizeof(float), NULL, &status);
+    checkError(status, "Failed to create buffer for output");
   }
 
   return true;
 }
+
 // Initialize the data for the problem. Requires num_devices to be known.
-void init_problem2(Node* node) {
+void init_problem() {
   if(num_devices == 0) {
     checkError(-1, "No devices");
   }
 
+  // Generate input matrices A and B. For matrix A, we divide up the host
+  // buffers so that the buffers are aligned for each device. The whole of
+  // matrix B is used by each device, so it does not need to be divided.
+  printf("Generating input matrices\n");
   input_a.reset(num_devices);
-  input_b.reset(B_height * B_width);
   output.reset(num_devices);
-
   for(unsigned i = 0; i < num_devices; ++i) {
-    input_a[i].reset(m_per_device[i] * A_width);
-    output[i].reset(m_per_device[i] * C_width);
+    input_a[i].reset(rows_per_device[i] * A_width);
+    output[i].reset(rows_per_device[i] * C_width);
 
-    for(unsigned j = 0; j < node->backwardConnCount; ++j){
-        Node *targetNode = node->connections[j].nodePtr;
-        if (targetNode != NULL){
-          input_a[i][j] = *node->connections[j].weightPtr;
-          input_b[j * B_width + 0] = targetNode->output;
-        } else {  
-          input_a[i][j] = 0; 
-          input_b[j * B_width + 0] = 0;
-        }
-       //std::cout << j << ". w = " << input_a[i][j] << " ; o = " << input_b[j * B_width] << std::endl; //TODO: delete
-    } 
-    for (unsigned j = node->backwardConnCount; j < A_width; ++j){
-      input_a[i][j] = 0; 
-      input_b[j * B_width + 0] = 0;
+    for(unsigned j = 0; j < rows_per_device[i] * A_width; ++j) {
+      input_a[i][j] = rand_float();
     }
-    for(unsigned j = 1; j < m_per_device[i]; ++j){
-      for(unsigned k = 0; k < A_width; ++k){
-        input_a[i][j * A_width + k] = 0;
-        input_b[k * B_width + j] = 0;
-      }
-    }
-    if (node->backwardConnCount > m_per_device[i] * A_width) { printf("ERROR: data > input_matrix %d %d\n",node->backwardConnCount,m_per_device[i] * A_width); exit(1); }
+  }
+
+  input_b.reset(B_height * B_width);
+  for(unsigned i = 0; i < B_height * B_width; ++i) {
+    input_b[i] = rand_float();
   }
 }
-//-----------------------------------------------------------------------------
-void compute_reference() {
-  // Compute the reference output.
-  printf("Computing reference output\n");
-  ref_out.reset(C_height * C_width);
 
-  for(unsigned y = 0, dev_index = 0; y < C_height; ++dev_index) {
-    for(unsigned yy = 0; yy < m_per_device[dev_index]; ++yy, ++y) {
-      for(unsigned x = 0; x < C_width; ++x) {
-        // Compute result for C(y, x)
-        float sum = 0.0f;
-        for(unsigned k = 0; k < A_width; ++k) {
-          sum += input_a[dev_index][yy * A_width + k] * input_b[k * B_width + x];
-        }
-        ref_out[y * C_width + x] = sum;
-      }
-    }
-  }
-}
-//-----------------------------------------------------------------------------
-void verify() {
-  printf("Verifying\n");
-
-  // Compute the L^2-Norm of the difference between the output and reference
-  // output matrices and compare it against the L^2-Norm of the reference.
-  float diff = 0.0f;
-  float ref = 0.0f;
-  for(unsigned y = 0, dev_index = 0; y < C_height; ++dev_index) {
-    for(unsigned yy = 0; yy < m_per_device[dev_index]; ++yy, ++y) {
-      for(unsigned x = 0; x < C_width; ++x) {
-        const float o = output[dev_index][yy * C_width + x];
-        const float r = ref_out[y * C_width + x];
-        const float d = o - r;
-        diff += d * d;
-        ref += r * r;
-      }
-    }
-  }
-
-  const float diff_l2norm = sqrtf(diff);
-  const float ref_l2norm = sqrtf(ref);
-  const float error = diff_l2norm / ref_l2norm;
-  const bool pass = error < 1e-6;
-  printf("Verification: %s\n", pass ? "PASS" : "FAIL");
-  if(!pass) {
-    printf("Error (L^2-Norm): %0.3g\n", error);
-  }
-}
-//-----------------------------------------------------------------------------
-float run2() {
+void run() {
   cl_int status;
 
   // Transfer inputs to each device. Each of the host buffers supplied to
@@ -422,13 +394,14 @@ float run2() {
   // for the host-to-device transfer.
   for(unsigned i = 0; i < num_devices; ++i) {
     status = clEnqueueWriteBuffer(queue[i], input_a_buf[i], CL_FALSE,
-        0, m_per_device[i] * A_width * sizeof(float), input_a[i], 0, NULL, NULL);
-    checkError(status, "Failed to transfer input 1");
+        0, rows_per_device[i] * A_width * sizeof(float), input_a[i], 0, NULL, NULL);
+    checkError(status, "Failed to transfer input A");
 
     status = clEnqueueWriteBuffer(queue[i], input_b_buf[i], CL_FALSE,
         0, B_width * B_height * sizeof(float), input_b, 0, NULL, NULL);
-    checkError(status, "Failed to transfer input 2");
+    checkError(status, "Failed to transfer input B");
   }
+
   // Wait for all queues to finish.
   for(unsigned i = 0; i < num_devices; ++i) {
     clFinish(queue[i]);
@@ -468,9 +441,9 @@ float run2() {
     //
     // Events are used to ensure that the kernel is not launched until
     // the writes to the input buffers have completed.
-    const size_t global_work_size[2] = {C_width, m_per_device[i]};
+    const size_t global_work_size[2] = {C_width, rows_per_device[i]};
     const size_t local_work_size[2]  = {BLOCK_SIZE, BLOCK_SIZE};
-    //printf("Launching for device %d (global size: %d, %d)\n", i, global_work_size[0], global_work_size[1]);
+    printf("Launching for device %d (global size: %d, %d)\n", i, global_work_size[0], global_work_size[1]);
 
     status = clEnqueueNDRangeKernel(queue[i], kernel[i], 2, NULL,
         global_work_size, local_work_size, 0, NULL, &kernel_event[i]);
@@ -506,17 +479,65 @@ float run2() {
   // Read the result.
   for(unsigned i = 0; i < num_devices; ++i) {
     status = clEnqueueReadBuffer(queue[i], output_buf[i], CL_TRUE,
-        0, m_per_device[i] * C_width * sizeof(float), output[i], 0, NULL, NULL);
+        0, rows_per_device[i] * C_width * sizeof(float), output[i], 0, NULL, NULL);
     checkError(status, "Failed to read output matrix");
   }
 
   // Verify results.
   compute_reference();
   verify();
-  return output[0][0];
 }
-//-----------------------------------------------------------------------------
-void cleanup2() {
+
+void compute_reference() {
+  // Compute the reference output.
+  printf("Computing reference output\n");
+  ref_output.reset(C_height * C_width);
+
+  for(unsigned y = 0, dev_index = 0; y < C_height; ++dev_index) {
+    for(unsigned yy = 0; yy < rows_per_device[dev_index]; ++yy, ++y) {
+      for(unsigned x = 0; x < C_width; ++x) {
+        // Compute result for C(y, x)
+        float sum = 0.0f;
+        for(unsigned k = 0; k < A_width; ++k) {
+          sum += input_a[dev_index][yy * A_width + k] * input_b[k * B_width + x];
+        }
+        ref_output[y * C_width + x] = sum;
+      }
+    }
+  }
+}
+
+void verify() {
+  printf("Verifying\n");
+
+  // Compute the L^2-Norm of the difference between the output and reference
+  // output matrices and compare it against the L^2-Norm of the reference.
+  float diff = 0.0f;
+  float ref = 0.0f;
+  for(unsigned y = 0, dev_index = 0; y < C_height; ++dev_index) {
+    for(unsigned yy = 0; yy < rows_per_device[dev_index]; ++yy, ++y) {
+      for(unsigned x = 0; x < C_width; ++x) {
+        const float o = output[dev_index][yy * C_width + x];
+        const float r = ref_output[y * C_width + x];
+        const float d = o - r;
+        diff += d * d;
+        ref += r * r;
+      }
+    }
+  }
+
+  const float diff_l2norm = sqrtf(diff);
+  const float ref_l2norm = sqrtf(ref);
+  const float error = diff_l2norm / ref_l2norm;
+  const bool pass = error < 1e-6;
+  printf("Verification: %s\n", pass ? "PASS" : "FAIL");
+  if(!pass) {
+    printf("Error (L^2-Norm): %0.3g\n", error);
+  }
+}
+
+// Free the resources allocated during initialization
+void cleanup() {
   for(unsigned i = 0; i < num_devices; ++i) {
     if(kernel && kernel[i]) {
       clReleaseKernel(kernel[i]);
@@ -542,5 +563,151 @@ void cleanup2() {
     clReleaseContext(context);
   }
 }
-void cleanup() { cleanup2(); }
-#endif
+
+// Initialize the data for the problem. Requires num_devices to be known.
+void init_problem2(Node* node) {
+  if(num_devices == 0) {
+    checkError(-1, "No devices");
+  }
+
+  input_a.reset(num_devices);
+  input_b.reset(B_height * B_width);
+  output.reset(num_devices);
+
+  for(unsigned i = 0; i < num_devices; ++i) {
+    input_a[i].reset(rows_per_device[i] * A_width);
+    output[i].reset(rows_per_device[i] * C_width);
+
+    for(unsigned j = 0; j < node->backwardConnCount; ++j){
+        Node *targetNode = node->connections[j].nodePtr;
+        if (targetNode != NULL){
+          input_a[i][j] = *node->connections[j].weightPtr;
+          input_b[j * B_width + 0] = targetNode->output;
+        } else {  
+          input_a[i][j] = 0; 
+          input_b[j * B_width + 0] = 0;
+        }
+       //std::cout << j << ". w = " << input_a[i][j] << " ; o = " << input_b[j * B_width] << std::endl; //TODO: delete
+    } 
+    for (unsigned j = node->backwardConnCount; j < A_width; ++j){
+      input_a[i][j] = 0; 
+      input_b[j * B_width + 0] = 0;
+    }
+    for(unsigned j = 1; j < rows_per_device[i]; ++j){
+      for(unsigned k = 0; k < A_width; ++k){
+        input_a[i][j * A_width + k] = 0;
+        input_b[k * B_width + j] = 0;
+      }
+    }
+    if (node->backwardConnCount > rows_per_device[i] * A_width) { printf("ERROR: data > input_matrix %d %d\n",node->backwardConnCount,rows_per_device[i] * A_width); exit(1); }
+  }
+}
+
+
+float run2() {
+  cl_int status;
+
+  // Transfer inputs to each device. Each of the host buffers supplied to
+  // clEnqueueWriteBuffer here is already aligned to ensure that DMA is used
+  // for the host-to-device transfer.
+  for(unsigned i = 0; i < num_devices; ++i) {
+    status = clEnqueueWriteBuffer(queue[i], input_a_buf[i], CL_FALSE,
+        0, rows_per_device[i] * A_width * sizeof(float), input_a[i], 0, NULL, NULL);
+    checkError(status, "Failed to transfer input 1");
+
+    status = clEnqueueWriteBuffer(queue[i], input_b_buf[i], CL_FALSE,
+        0, B_width * B_height * sizeof(float), input_b, 0, NULL, NULL);
+    checkError(status, "Failed to transfer input 2");
+  }
+  // Wait for all queues to finish.
+  for(unsigned i = 0; i < num_devices; ++i) {
+    clFinish(queue[i]);
+  }
+
+  // Launch kernels.
+  // This is the portion of time that we'll be measuring for throughput
+  // benchmarking.
+  scoped_array<cl_event> kernel_event(num_devices);
+
+  //const double start_time = getCurrentTimestamp();
+  for(unsigned i = 0; i < num_devices; ++i) {
+    // Set kernel arguments.
+    unsigned argi = 0;
+
+    status = clSetKernelArg(kernel[i], argi++, sizeof(cl_mem), &output_buf[i]);
+    checkError(status, "Failed to set argument %d", argi - 1);
+
+    status = clSetKernelArg(kernel[i], argi++, sizeof(cl_mem), &input_a_buf[i]);
+    checkError(status, "Failed to set argument %d", argi - 1);
+
+    status = clSetKernelArg(kernel[i], argi++, sizeof(cl_mem), &input_b_buf[i]);
+    checkError(status, "Failed to set argument %d", argi - 1);
+
+    status = clSetKernelArg(kernel[i], argi++, sizeof(A_width), &A_width);
+    checkError(status, "Failed to set argument %d", argi - 1);
+
+    status = clSetKernelArg(kernel[i], argi++, sizeof(B_width), &B_width);
+    checkError(status, "Failed to set argument %d", argi - 1);
+
+    // Enqueue kernel.
+    // Use a global work size corresponding to the size of the output matrix.
+    // Each work-item computes the result for one value of the output matrix,
+    // so the global work size has the same dimensions as the output matrix.
+    // 
+    // The local work size is one block, so BLOCK_SIZE x BLOCK_SIZE.
+    //
+    // Events are used to ensure that the kernel is not launched until
+    // the writes to the input buffers have completed.
+    const size_t global_work_size[2] = {C_width, rows_per_device[i]};
+    const size_t local_work_size[2]  = {BLOCK_SIZE, BLOCK_SIZE};
+    //printf("Launching for device %d (global size: %d, %d)\n", i, global_work_size[0], global_work_size[1]);
+
+    status = clEnqueueNDRangeKernel(queue[i], kernel[i], 2, NULL,
+        global_work_size, local_work_size, 0, NULL, &kernel_event[i]);
+    checkError(status, "Failed to launch kernel");
+  }
+
+  // Wait for all kernels to finish.
+  clWaitForEvents(num_devices, kernel_event);
+
+  //const double end_time = getCurrentTimestamp();
+  //const double total_time = end_time - start_time;
+
+  // Wall-clock time taken.
+  //printf("\nTime: %0.3f ms\n", total_time * 1e3);
+
+  // Get kernel times using the OpenCL event profiling API.
+  //for(unsigned i = 0; i < num_devices; ++i) {
+  //  cl_ulong time_ns = getStartEndTime(kernel_event[i]);
+  //  printf("Kernel time (device %d): %0.3f ms\n", i, double(time_ns) * 1e-6);
+  //}
+
+  // Compute the throughput (GFLOPS).
+  // There are C_width * C_height output values, with each value
+  // computed using A_width multiplies and adds.
+  //const float flops = (float)(2.0f * C_width * C_height * A_width / total_time);
+  //printf("\nThroughput: %0.2f GFLOPS\n\n", flops * 1e-9);
+
+  // Release kernel events.
+  for(unsigned i = 0; i < num_devices; ++i) {
+    clReleaseEvent(kernel_event[i]);
+  }
+
+  // Read the result.
+  for(unsigned i = 0; i < num_devices; ++i) {
+    status = clEnqueueReadBuffer(queue[i], output_buf[i], CL_TRUE,
+        0, rows_per_device[i] * C_width * sizeof(float), output[i], 0, NULL, NULL);
+    checkError(status, "Failed to read output matrix");
+  }
+/*
+  for (unsigned i = 0; i < C_height; ++i){
+    for (unsigned j=0; j < C_width; ++j)
+      printf("%f ", output[i][j]);
+    printf("\n");
+  }
+  */
+  // Verify results.
+  //compute_reference();
+  //verify();
+  return output[0][0];
+}

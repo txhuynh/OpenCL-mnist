@@ -12,15 +12,26 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <iostream>
 
 // Include project libraries
 #include "mnist-utils.h"
+//#include "util/screen.h"
 #include "dnn.h"
+#include "CL/opencl.h"
+#include "AOCLUtils/aocl_utils.h"
+#include "main.h"
 
-
-
+//from main.cpp
+using namespace aocl_utils;
+extern unsigned num_devices;
+extern unsigned M;
+extern scoped_array<scoped_aligned_ptr<float> > in1, in2; // num_devices elements
+extern scoped_array<scoped_aligned_ptr<float> > out; // num_devices elements
+extern scoped_array<unsigned> m_per_device; // num_devices elements
 
 #define OUT_OF_RANGE -1     // A marker for labeling node ids that are outside the given node map
+//#define M_E 2.71828182845904523536
 
 
 
@@ -448,7 +459,7 @@ Weight getDerivative(Weight outVal, ActFctType actType){
  * @param learningRate The factor with which errors are applied to weights
  */
 
-void updateNodeWeights(Node *updateNode, double learningRate){
+void updateNodeWeights(Node *updateNode, float learningRate){
     
     // @attention When updating the weights, only use the BACKWARD connections
     for (int i=0; i<updateNode->backwardConnCount; i++){
@@ -475,9 +486,9 @@ void updateNodeWeights(Node *updateNode, double learningRate){
  * @param thisNode A pointer to the node whose (to be back propagated) error is to be calculated
  */
 
-double calcNodeError(Node *thisNode) {
+float calcNodeError(Node *thisNode) {
    
-    double nodeErrorSum = 0;
+    float nodeErrorSum = 0;
 
     int forwardConnStart = thisNode->backwardConnCount;
     
@@ -492,75 +503,6 @@ double calcNodeError(Node *thisNode) {
 
     return nodeErrorSum;
 }
-
-
-
-
-/**
- * @brief Back propagates network error to hidden layer
- * @details Backpropagating a layer means looping through all its nodes' connections,
- * and update the errorSum attached to the TARGET node (=previous layer) of each connection
- * i.e. when "backpropagating" layer x, then the errorSum of the nodes of layer x-1 are calculated
- * @param nn A pointer to the neural network
- * @param layerId The id of the layer that is to be back propagated
- */
-
-void backPropagateLayer(Network *nn, int layerId){
-    
-    Layer *hl = getNetworkLayer(nn, layerId);
-
-    for (int c=0; c<hl->columnCount; c++){
-        
-        for (int n=0; n<hl->columns[0].nodeCount; n++){
-            
-            Node *hn = getNetworkNode(hl,c,n);
-            
-            hn->errorSum = calcNodeError(hn) * getDerivative(hn->output, hl->layerDef->activationType);
-
-            updateNodeWeights(hn, nn->learningRate);
-            
-        }
-        
-    }
-    
-}
-
-
-
-
-/**
- * @brief Calculates the error (difference of desired classification vs actual node output) of each output node
- * and back propagates the error in the output layer to the previous layer
- * @details The error is calculated based on the given target classification (= image label)
- * and is stored in each output node so that it can be backpropagated later
- * @param nn A pointer to the neural network
- * @param targetClassification The correct/desired classification (=label) of this recognition/image
- */
-
-void backPropagateOutputLayer(Network *nn, int targetClassification){
-    
-    Layer *ol = getNetworkLayer(nn, nn->layerCount-1);
-    
-    for (int o=0;o<ol->columnCount;o++){
-    
-        for (int n=0; n<ol->columns[0].nodeCount; n++){
-            
-            Node *on = getNetworkNode(ol,o,n);
-            
-            int targetOutput = (o==targetClassification)?1:0;
-            
-            double errorDelta = targetOutput - on->output;
-            
-            on->errorSum = errorDelta * getDerivative(on->output, ol->layerDef->activationType);
-
-            updateNodeWeights(on, nn->learningRate);
-            
-        }
-        
-    }
-    
-}
-
 
 
 
@@ -582,99 +524,33 @@ void backPropagateOutputLayer(Network *nn, int targetClassification){
 
 void backPropagateNetwork(Network *nn, int targetClassification){
 
-    backPropagateOutputLayer(nn, targetClassification);
+    ////backPropagateOutputLayer(nn, targetClassification); begins
+    Layer *ol = getNetworkLayer(nn, nn->layerCount-1);
+    for (int o=0;o<ol->columnCount;o++){
+        for (int n=0; n<ol->columns[0].nodeCount; n++){
+            Node *on = getNetworkNode(ol,o,n);
+            int targetOutput = (o==targetClassification)?1:0;
+            float errorDelta = targetOutput - on->output;
+            on->errorSum = errorDelta * getDerivative(on->output, ol->layerDef->activationType);
+            updateNodeWeights(on, nn->learningRate);
+        }
+    }
+    ////backPropagateOutputLayer(nn, targetClassification); endss
 
     // Loop backwards from the output layer to the SECOND=#1 layer
     // (the FIRST=#0 layer is the input layer)
-    for (int i=(nn->layerCount)-2; i>0; i--) backPropagateLayer(nn, i);
-    
-}
-
-
-
-
-/**
- * @brief Performs an activiation function to a specified node
- * @param node Pointer to the node that is to be "activated"
- * @param actType The type of activation function to be applied (SIGMOID/TANH/RELU)
- */
-
-void activateNode(Node *node, ActFctType actType){
-    
-    switch (actType) {
-        case SIGMOID:
-            node->output = 1 / (1 + (exp((Weight)-node->output)) );
-            break;
-            
-        case TANH:
-            node->output = tanh(node->output);
-            break;
-            
-        case RELU:
-            node->output =   log(1 + pow(M_E,node->output));
-            break;
-            
-        case NONE:
-            break;
-            
-        default:
-            printf("Undefined activation function! ABORT!\n");
-            exit(1);
-            break;
-    }
-    
-    
-}
-
-
-
-
-/**
- * @brief Calculates the output value of a specified node 
- * @details Calculates the vector product of a node's weights with the connections' target nodes' outputs
- * @param node Pointer to the node whose output is to be calculated
- */
-
-void calcNodeOutput(Node *node){
-    
-    // Start by adding the bias
-    node->output = node->bias;
-
-    // @attention When calculating node output only loop through the BACKWARD connections
-    for (int i=0; i<node->backwardConnCount;i++){
-        
-        Node *targetNode = node->connections[i].nodePtr;
-        
-        if (targetNode != NULL) {
-            Weight weight = *node->connections[i].weightPtr;
-            node->output += targetNode->output * weight;
-        }
-    
-    }
-    
-}
-
-
-
-
-/**
- * @brief Calculates the output values of all nodes of a given layer
- * @param layer Pointer to the layer whose nodes are to be activated/calculated
- */
-
-void calcNetworkLayer(Layer *layer){
-
-    for (int c=0;c<layer->columnCount; c++){
-        
-        for (int n=0; n<layer->columns[0].nodeCount; n++){
-            
-            Node *node = getNetworkNode(layer, c, n);
-            
-            calcNodeOutput(node);
-            activateNode(node, layer->layerDef->activationType);
-            
-        }
-        
+    for (int i=(nn->layerCount)-2; i>0; i--) {
+      int layerId = i;
+      ////backPropagateLayer(nn, i); begins
+      Layer *hl = getNetworkLayer(nn, layerId);
+      for (int c=0; c<hl->columnCount; c++){
+          for (int n=0; n<hl->columns[0].nodeCount; n++){
+              Node *hn = getNetworkNode(hl,c,n);
+              hn->errorSum = calcNodeError(hn) * getDerivative(hn->output, hl->layerDef->activationType);
+              updateNodeWeights(hn, nn->learningRate);
+          }
+      }
+      ////backPropagateLayer(nn, i); endss
     }
 }
 
@@ -688,12 +564,68 @@ void calcNetworkLayer(Layer *layer){
  */
 
 void feedForwardNetwork(Network *nn){
-    
     for (int l=1; l<nn->layerCount; l++){  // @ATTENTION: Skip the first (=INPUT) layer!
         Layer *layer = getNetworkLayer(nn, l);
-        calcNetworkLayer(layer);
+        ////calcNetworkLayer(layer) begins
+        for (int c=0;c<layer->columnCount; c++){
+            for (int n=0; n<layer->columns[0].nodeCount; ++n){
+                Node *node = getNetworkNode(layer, c, n);
+                ////calcNodeOutput(node); begins
+                // Start by adding the bias
+                node->output = node->bias;
+                // @attention When calculating node output only loop through the BACKWARD connections
+                //printf("backwardConnCount: %d\n", node->backwardConnCount);
+                float result = 0.0;
+                  init_problem2(node);
+                  result += run2();
+                  //std::cout << "result = " << result << std::endl; //TODO: delete
+                  //printf("here %d\n", layer->columns[0].nodeCount); 
+                  //if (c==1){ cleanup(); exit(0); }//TODO: delete
+//                }
+/*
+                int count = 0;
+                float temp[180];
+                for(unsigned i = 0; i < num_devices; ++i) {
+                  for(unsigned j = 0; j < m_per_device[i]; ++j) {
+                      if (count < node->backwardConnCount) temp[count] = out[i][j];
+                  }
+                } 
+
+                for (int i=0; i<node->backwardConnCount;i++){
+                    Node *targetNode = node->connections[i].nodePtr;
+                    if (targetNode != NULL) {
+                        //Weight weight = *node->connections[i].weightPtr;
+                        //node->output += targetNode->output * weight;
+                        node->output += temp[i];
+                    }
+                }
+*/
+                node->output = result; 
+                //printf("node output: %lf\n", node->output);
+                ////calcNodeOutput(node); ends
+                ////activateNode(node, layer->layerDef->activationType); begins
+                ActFctType actType =  layer->layerDef->activationType;
+                switch (actType) {
+                    case SIGMOID:
+                        node->output = 1 / (1 + (exp((Weight)-node->output)) );
+                        break;
+                    case TANH:
+                        node->output = tanh(node->output);
+                        break;
+                    case RELU:
+                        node->output =   log(1 + pow(M_E,node->output));
+                        break;
+                    case NONE:
+                        break;
+                    default:
+                        printf("Undefined activation function! ABORT!\n");
+                        exit(1);
+                        break;
+                }
+                ////activateNode(node, layer->layerDef->activationType); ends
+            }
+        } ////calcNetworkLayer(layer) ends
     }
-    
 }
 
 
@@ -764,7 +696,7 @@ void initNetworkWeights(Network *nn){
     // Init weights in the weight block
     for (int i=0; i<nn->weightCount; i++){
         Weight *w = &nn->weightsPtr[i];
-        *w = 0.4 * (Weight)rand() / RAND_MAX;   // multiplying by a number <0 results in better performance
+        *w = 0.7 * (Weight)rand() / RAND_MAX;   // multiplying by a number <0 results in better performance
         if (i%2) *w = -*w;                      // make half of the weights negative (for better performance)
     }
     
@@ -799,7 +731,7 @@ void initNetworkWeights(Network *nn){
 
 int calcStride(int tgtWidth, int filter, int srcWidth){
     
-  return ceil(((double)tgtWidth - filter)/(srcWidth-1));
+  return ceil(((float)tgtWidth - filter)/(srcWidth-1));
     
 }
 
@@ -835,7 +767,7 @@ void calcFilterColumnIds(Layer *srcLayer, int srcColId, Layer *tgtLayer, Vector 
     int stride = calcStride(tgtWidth, filter, srcWidth);
     
     int startX = (srcColId % srcWidth) * stride;
-    int startY = floor((double)srcColId/srcWidth) * stride;
+    int startY = floor((float)srcColId/srcWidth) * stride;
     
     int id=0;
 
@@ -1098,7 +1030,7 @@ Vector *createFilterColumnIds(Layer *thisLayer, int columnId, Layer *prevLayer){
     // number of values in the vector equals the size of the filter window
     // @attention This is done even for non-convolutional layer because their filter is 0 thus no impact
     int colIdCount = thisLayer->layerDef->filter * thisLayer->layerDef->filter;
-    ByteSize vectorSize = sizeof(Vector) + (colIdCount * sizeof(double));  // TODO don't need "double" here
+    ByteSize vectorSize = sizeof(Vector) + (colIdCount * sizeof(float));  // TODO don't need "float" here
     
     // Calculate a matrix of column/node ids depicting a moving filter/kernel window in the target layer
     Vector *filterColIds = (Vector*)malloc(vectorSize);
@@ -1349,7 +1281,7 @@ void setNetworkDefaults(Network *nn, int layerCount, LayerDefinition *layerDefs,
     for (int l=0; l<layerCount; l++) nn->weightCount += getLayerWeightCount(layerDefs+l);
     
     // Cross-check the network's weight count ("just to make sure :-)")
-    if (nn->weightCount != (double)weightBlockSize/sizeof(Weight)) {
+    if (nn->weightCount != (float)weightBlockSize/sizeof(Weight)) {
         printf("Incorrect weight count! ABORT!");
         exit (1);
     }
@@ -1379,7 +1311,7 @@ Network *createNetwork(int layerCount, LayerDefinition *layerDefs){
     setNetworkDefaults(nn, layerCount, layerDefs, netSize);
 
     // Output message to inform user in case the initialization process takes longer (large network)
-    // printf("Initializing network... \n\n");
+    printf("Initializing network... \n\n");
     
     // Initialize the network's layers, nodes, connections and weights
     initNetwork(nn, layerCount, layerDefs);
@@ -1437,7 +1369,7 @@ bool isValidNetworkDefinition(int layerCount, LayerDefinition *layerDefs){
         if ((layerDef->layerType == CONVOLUTIONAL) &&
             (layerDef->nodeMap.height==0 || layerDef->nodeMap.depth==0))
             isValid = false;
-
+        
         // CONVOLUTIONAL layers must have a FILTER and a STRIDE
         if (layerDef->layerType==CONVOLUTIONAL && (layerDef->filter == 0)) isValid = false;
         
@@ -1528,101 +1460,4 @@ LayerDefinition *setLayerDefinitions(int layerCount, ...){
     setLayerDefinitionDefaults(layerCount, layerDefs);
     
     return layerDefs;
-}
-
-/**
- * @brief Trains a network on the MNIST training set
- * @details Trains the network by feeding input, calculating and backpropaging the error, updating weights
- * @param nn A pointer to the network
- */
-
-void trainNetwork(Network *nn){
-    
-    // open MNIST files
-    FILE *imageFile, *labelFile;
-    imageFile = openMNISTImageFile(MNIST_TRAINING_SET_IMAGE_FILE_NAME);
-    labelFile = openMNISTLabelFile(MNIST_TRAINING_SET_LABEL_FILE_NAME);
-    
-    int errCount = 0;
-    
-    // Loop through all images in the file
-    for (int imgCount=0; imgCount<MNIST_MAX_TRAINING_IMAGES; imgCount++){
-        
-        // Reading next image and its corresponding label
-        MNIST_Image img = getImage(imageFile);
-        MNIST_Label lbl = getLabel(labelFile);
-        
-        // Convert the MNIST image to a standardized vector format and feed into the network
-        Vector *inpVector = getVectorFromImage(&img);
-        feedInput(nn, inpVector);
-
-        // Feed forward all layers (from input to hidden to output) calculating all nodes' output
-        feedForwardNetwork(nn);
-
-        // Back propagate the error and adjust weights in all layers accordingly
-        backPropagateNetwork(nn, lbl);
-
-        // Classify image by choosing output cell with highest output
-        int classification = getNetworkClassification(nn);
-        if (classification!=lbl) errCount++;
-
-        // Display progress during training
-        // displayTrainingProgress(imgCount, errCount);
-
-    }
-    
-    // Close files
-    fclose(imageFile);
-    fclose(labelFile);
-    
-}
-
-/**
- * @brief Tests an already trained network on the MNIST testing set
- * @details Follows same steps as training process but without backpropagation and updating weights
- * @param nn A pointer to the network
- */
-
-void testNetwork(Network *nn){
-    
-    // open MNIST files
-    FILE *imageFile, *labelFile;
-    imageFile = openMNISTImageFile(MNIST_TESTING_SET_IMAGE_FILE_NAME);
-    labelFile = openMNISTLabelFile(MNIST_TESTING_SET_LABEL_FILE_NAME);
-
-    double accuracy;
-    
-    int errCount = 0;
-    int imgCount = 0;
-    
-    // Loop through all images in the file
-    for (imgCount=0; imgCount<MNIST_MAX_TESTING_IMAGES; imgCount++){
-        
-        // Reading next image and its corresponding label
-        MNIST_Image img = getImage(imageFile);
-        MNIST_Label lbl = getLabel(labelFile);
-        
-        // Convert the MNIST image to a standardized vector format and feed into the network
-        Vector *inpVector = getVectorFromImage(&img);
-        feedInput(nn, inpVector);
-        
-        // Feed forward all layers (from input to hidden to output) calculating all nodes' output
-        feedForwardNetwork(nn);
-        
-        // Classify image by choosing output cell with highest output
-        int classification = getNetworkClassification(nn);
-        if (classification!=lbl) errCount++;
-        
-        // Display progress during testing
-        // displayTestingProgress(imgCount, errCount);
-    }
-
-    accuracy = 1 - ((double)errCount/(double)(imgCount+1));
-    // printf("Result: Correct=%'6d  Incorrect=%'6d  Accuracy=%5.2f%%",imgCount+1-errCount, errCount, accuracy*100);
-    printf("%5.2f%%\n", accuracy*100);
-    
-    // Close files
-    fclose(imageFile);
-    fclose(labelFile);
-    
 }
