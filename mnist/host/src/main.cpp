@@ -345,22 +345,24 @@ void init_problem2(Node* node) {
         Node *targetNode = node->connections[j].nodePtr;
         if (targetNode != NULL){
           input_a[i][j] = *node->connections[j].weightPtr;
-          input_b[j * B_width + i] = targetNode->output;
+          input_b[j * B_width + 0] = targetNode->output;
         } else {  
           input_a[i][j] = 0; 
-          input_b[j * B_width + i] = 0;
+          input_b[j * B_width + 0] = 0;
         }
-        std::cout << j << ". w = " << input_a[i][j] << " ; o = " << input_b[j * B_width + i] << std::endl; //TODO: delete
-
+       //std::cout << j << ". w = " << input_a[i][j] << " ; o = " << input_b[j * B_width] << std::endl; //TODO: delete
+    } 
+    for (unsigned j = node->backwardConnCount; j < A_width; ++j){
+      input_a[i][j] = 0; 
+      input_b[j * B_width + 0] = 0;
+    }
+    for(unsigned j = 1; j < m_per_device[i]; ++j){
+      for(unsigned k = 0; k < A_width; ++k){
+        input_a[i][j * A_width + k] = 0;
+        input_b[k * B_width + j] = 0;
+      }
     }
     if (node->backwardConnCount > m_per_device[i] * A_width) { printf("ERROR: data > input_matrix %d %d\n",node->backwardConnCount,m_per_device[i] * A_width); exit(1); }
-
-    printf(" here 2: %d %d\n", node->backwardConnCount, m_per_device[i] * A_width); exit(0);
-    for(unsigned j = node->backwardConnCount; j < m_per_device[i] * A_width; ++j) { 
-      input_a[i][j] = 0;
-      input_b[j * B_width + i] = 0;
-  printf("here 3-----\n");
-    }
   }
 }
 //-----------------------------------------------------------------------------

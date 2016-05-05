@@ -581,7 +581,7 @@ void feedForwardNetwork(Network *nn){
                   result += run2();
                   std::cout << "result = " << result << std::endl; //TODO: delete
                   
-                  if (n==5){ cleanup2(); exit(0); }//TODO: delete
+                  //if (n==1){ cleanup2(); exit(0); }//TODO: delete
 //                }
 /*
                 int count = 0;
